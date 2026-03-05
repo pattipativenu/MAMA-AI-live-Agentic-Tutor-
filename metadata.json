@@ -1,0 +1,8 @@
+{
+  "name": "Mama AI",
+  "description": "Voice-first, mobile-only AI tutoring application for students featuring real-time camera and voice interaction.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
