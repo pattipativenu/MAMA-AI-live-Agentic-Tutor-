@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield } from 'lucide-react';
-import { useProfile, UserProfile } from '../hooks/useProfile';
+import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut } from 'lucide-react';
+import { UserProfile } from '../hooks/useProfile';
+import { useAuth } from '../contexts/AuthContext';
+import { doc, setDoc } from 'firebase/firestore';
+import { updatePassword } from 'firebase/auth';
+import { db } from '../firebase';
 
 const HOBBIES = [
   { id: 'cricket', label: 'Cricket', icon: Trophy },
@@ -23,10 +27,17 @@ const LEARNING_STYLES = [
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { profile, saveProfile } = useProfile();
-  const [formData, setFormData] = useState<UserProfile>(profile);
+  const { userProfile, currentUser, refreshProfile, logout } = useAuth();
+
+  const [formData, setFormData] = useState<UserProfile>(userProfile || { name: '', age: '', gender: '', hobbies: [], learningStyle: '' });
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'account' | 'profile'>('account');
+
+  useEffect(() => {
+    if (userProfile) {
+      setFormData(userProfile);
+    }
+  }, [userProfile]);
 
   // Password change state
   const [newPassword, setNewPassword] = useState('');
@@ -34,29 +45,38 @@ export default function Settings() {
 
   const toggleHobby = (hobbyId: string) => {
     setFormData(prev => {
-      const hobbies = prev.hobbies.includes(hobbyId)
+      const hobbies = prev.hobbies?.includes(hobbyId)
         ? prev.hobbies.filter(h => h !== hobbyId)
-        : [...prev.hobbies, hobbyId];
+        : [...(prev.hobbies || []), hobbyId];
       return { ...prev, hobbies };
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (newPassword && newPassword !== confirmPassword) {
       alert("Passwords do not match!");
       return;
     }
 
-    const payload = { ...formData };
-    if (newPassword) {
-      payload.password = newPassword;
-    }
+    if (!currentUser) return;
 
-    saveProfile(payload);
-    setSaved(true);
-    setNewPassword('');
-    setConfirmPassword('');
-    setTimeout(() => setSaved(false), 2000);
+    try {
+      const userRef = doc(db, 'users', currentUser.uid);
+      await setDoc(userRef, formData, { merge: true });
+
+      if (newPassword) {
+        await updatePassword(currentUser, newPassword);
+      }
+
+      await refreshProfile();
+      setSaved(true);
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: any) {
+      console.error(e);
+      alert(e.message || "Failed to save settings.");
+    }
   };
 
   return (
@@ -99,6 +119,13 @@ export default function Settings() {
               <h2 className="text-sm font-bold text-zinc-800 uppercase tracking-wider flex items-center gap-2">
                 <User size={16} className="text-amber-500" /> Personal Info
               </h2>
+
+              <div className="space-y-1.5 min-w-0">
+                <label className="text-xs font-bold text-zinc-500 uppercase ml-1">Email</label>
+                <div className="w-full bg-zinc-100 border border-zinc-200 rounded-2xl px-4 py-3 text-zinc-500 font-medium">
+                  {currentUser?.email}
+                </div>
+              </div>
 
               <div className="space-y-1.5 min-w-0">
                 <label className="text-xs font-bold text-zinc-500 uppercase ml-1">Full Name</label>
@@ -164,6 +191,12 @@ export default function Settings() {
                   className="w-full bg-zinc-50 border border-zinc-200 rounded-2xl px-4 py-3 text-zinc-900 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition-all font-medium"
                 />
               </div>
+            </div>
+
+            <div className="space-y-4 bg-white p-5 rounded-3xl border border-red-100 shadow-sm mt-4">
+              <button onClick={() => logout()} className="w-full flex justify-center items-center gap-2 text-red-500 font-bold py-2 hover:bg-red-50 rounded-xl transition-colors">
+                <LogOut size={18} /> Logout
+              </button>
             </div>
           </div>
         )}

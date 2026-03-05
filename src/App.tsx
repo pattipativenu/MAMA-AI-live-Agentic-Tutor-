@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import MobileLayout from './components/MobileLayout';
 import Home from './pages/Home';
 import LabEntry from './pages/lab/Entry';
@@ -10,7 +10,27 @@ import StudyLibrary from './pages/study/StudyLibrary';
 import StudyDetail from './pages/study/StudyDetail';
 import TutorChat from './pages/study/TutorChat';
 
+import Login from './pages/auth/Login';
+import Signup from './pages/auth/Signup';
+import Onboarding from './pages/auth/Onboarding';
+import { useAuth } from './contexts/AuthContext';
+
+function ProtectedLayout() {
+  const { currentUser, userProfile } = useAuth();
+
+  if (!currentUser) return <Navigate to="/login" replace />;
+  // We cannot navigate to onboarding if they are completely unauthenticated because they wouldn't hit this wrapper, but just in case:
+  if (!userProfile) return <Navigate to="/onboarding" replace />;
+
+  return (
+    <MobileLayout>
+      <Outlet />
+    </MobileLayout>
+  );
+}
+
 export default function App() {
+  const { currentUser, userProfile } = useAuth();
   const [hasKey, setHasKey] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -36,7 +56,8 @@ export default function App() {
     return <div className="min-h-screen bg-[rgb(250,249,245)] flex items-center justify-center text-zinc-900">Loading...</div>;
   }
 
-  if (!hasKey) {
+  // We only enforce API key check if the user is authenticated and trying to use the app
+  if (!hasKey && currentUser && userProfile) {
     return (
       <div className="min-h-screen bg-[rgb(250,249,245)] flex flex-col items-center justify-center text-zinc-900 p-6 text-center">
         <h1 className="text-2xl font-bold mb-4">API Key Required</h1>
@@ -57,20 +78,29 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <MobileLayout>
-        <Routes>
-          {/* Core routes */}
+      <Routes>
+        {/* Auth Routes */}
+        <Route path="/login" element={currentUser ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/signup" element={currentUser ? <Navigate to="/" replace /> : <Signup />} />
+
+        {/* Onboarding Route (Requires auth, but NO profile yet) */}
+        <Route path="/onboarding" element={
+          !currentUser ? <Navigate to="/login" replace /> :
+            userProfile ? <Navigate to="/" replace /> : <Onboarding />
+        } />
+
+        {/* Protected App Routes (Wrapped in MobileLayout) */}
+        <Route element={<ProtectedLayout />}>
           <Route path="/" element={<Home />} />
           <Route path="/lab/entry" element={<LabEntry />} />
           <Route path="/exam/entry" element={<ExamEntry />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/settings" element={<Settings />} />
-          {/* Textbook Grounded Learning routes */}
           <Route path="/study" element={<StudyLibrary />} />
           <Route path="/study/:bookId" element={<StudyDetail />} />
           <Route path="/study/:bookId/:chapterIndex" element={<TutorChat />} />
-        </Routes>
-      </MobileLayout>
+        </Route>
+      </Routes>
     </BrowserRouter>
   );
 }
