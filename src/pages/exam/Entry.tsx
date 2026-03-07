@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Mic, MicOff, ArrowLeft, Image as ImageIcon, Loader2, Camera, X } from 'lucide-react';
+import { Mic, MicOff, ArrowLeft, Image as ImageIcon, Loader2, Camera, X, ArrowRight } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useSessions } from '../../hooks/useSessions';
+import { useExamMachine } from '../../machines/examMachine';
+import CarouselViewer from '../../components/Carousel/CarouselViewer';
+import { CarouselSlide } from '../../hooks/useCarousel';
+import { subscribeToVideoJobs } from '../../services/generationQueue';
 
 export const getExamSystemInstruction = (profile: UserProfile) => {
   let profileContext = "";
@@ -17,16 +21,6 @@ export const getExamSystemInstruction = (profile: UserProfile) => {
   }
 
   return `
-      You are Mama AI, a strict but fair examiner for students in Classes 5 through 12.
-      The student is entering "Exam Mode". You test Science (Physics, Chemistry, Biology) and Math.
-      ${profileContext}
-      CRITICAL TEACHING RULES:
-      1. AGE & PERSONALIZATION FIRST: Politely ask the student for their age/grade, gender, and their favorite activity/hobby before starting the exam ONLY IF it is not provided in the profile above. DO NOT assume their favorite activity. Use their chosen activity to personalize your questions and explanations.
-      2. REAL-WORLD FIRST: If a student struggles and needs an explanation, or if you are correcting them, you MUST first use a simple, relatable real-world example tailored to their age and chosen activity.
-      3. SCIENCE/MATH SECOND: Only after the real-world example should you explain the formal language or formulas.
-      4. INTERACTIVE LEARNING: Ask them to write down formulas or draw diagrams on a piece of paper to show their work.
-      5. VISUAL AIDS (CRITICAL): When explaining dimensions, geometry, or any visual concept during a correction, you MUST use the \`generate_image\` tool.
-         - The image prompt MUST be highly detailed, including specific measurements, dimensions, labels, etc.
          - Tailor the visual complexity to their age: for young kids, use simple, fun visuals without complex formulas. For older teens (Class 11/12), include advanced formulas, vectors, or graphs.
          - NEVER include the text "Class X" or the student's grade in the image prompt text.
          - Tell the user you are generating an image for them.
@@ -47,11 +41,12 @@ export default function ExamEntry() {
   
   const { profile } = useProfile();
   const { sessions, saveSession } = useSessions();
+  const { step, nextStep } = useExamMachine();
   
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { isConnected, isConnecting, status, messages, isSilent, isMuted, currentImage, isGeneratingImage, connect, disconnect, toggleMute } = useGeminiLive((msgs) => {
+  const { isConnected, isConnecting, status, messages, isSilent, isMuted, currentImage, isGeneratingImage, connect, disconnect, toggleMute, sendClientMessage } = useGeminiLive((msgs) => {
     saveSession('exam', msgs);
   });
 
@@ -60,6 +55,33 @@ export default function ExamEntry() {
       disconnect();
     };
   }, [disconnect]);
+
+  // Local state for dynamically injected video paths (since they finish asynchronously via Veo)
+  const [asyncSlides, setAsyncSlides] = useState<CarouselSlide[]>([]);
+
+  // Update local slides when a session's generationJob finishes building the initial placeholders
+  useEffect(() => {
+    const activeSession = sessions.find(s => s.id === "current");
+    if (activeSession?.generationJob?.slides) {
+      setAsyncSlides(activeSession.generationJob.slides);
+    }
+  }, [sessions]);
+
+  // Listen to background Veo video jobs
+  useEffect(() => {
+    if (!profile?.uid) return;
+    const unsubscribe = subscribeToVideoJobs(
+      profile.uid,
+      "current",
+      (slideId, videoUrl) => {
+        // Find and replace the placeholder video URL with the final generated Veo
+        setAsyncSlides(prev => prev.map(slide =>
+          slide.id === slideId ? { ...slide, url: videoUrl, type: 'video' } : slide
+        ));
+      }
+    );
+    return () => unsubscribe();
+  }, [profile?.uid]);
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -92,11 +114,64 @@ export default function ExamEntry() {
     connect(instruction, previousMessages, selectedImage);
   };
 
+  const handleNextStep = () => {
+    const next = nextStep();
+    if (!isConnected) return;
+
+    sendClientMessage(`[SYSTEM DYNAMIC INSTRUCTION]: The student has manually moved the session to the next step in their structured Exam. Please seamlessly adapt your test questions and evaluation strategy to match this new phase. Avoid explicitly saying "Moving to the next phase", just drive the conversation forward.`);
+  };
+
+  // Extract dynamically generated slides
+  const slidesToPlay = asyncSlides.length > 0 ? asyncSlides : [];
+
   return (
-    <div className="flex flex-col h-screen bg-[rgb(250,249,245)] text-zinc-900 overflow-hidden relative">
-      
+    <div className="flex flex-col h-dvh bg-[rgb(250,249,245)] text-zinc-900 overflow-hidden relative">
+
+      {/* Structured Session Phase Header */}
+      <div className="absolute top-0 inset-x-0 z-30 p-4 flex items-center justify-between bg-white/80 backdrop-blur-md border-b border-zinc-200">
+        <button onClick={() => navigate('/')} className="p-2 border border-zinc-200 rounded-full hover:bg-zinc-50 transition-colors">
+          <X size={18} className="text-zinc-600" />
+        </button>
+        <div className="flex flex-col items-center">
+          <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Exam Step</span>
+          <span className="text-sm font-bold text-amber-700 uppercase tracking-wide bg-amber-50 px-3 py-1 rounded-full mt-1 border border-amber-100">
+            {step.replace('_', ' ')}
+          </span>
+        </div>
+        <button
+          onClick={handleNextStep}
+          disabled={step === 'complete' || !isConnected}
+          className="p-2 border border-amber-200 bg-amber-50 rounded-full hover:bg-amber-100 transition-colors text-amber-600 disabled:opacity-30"
+          title="Advance to next step"
+        >
+          <ArrowRight size={18} />
+        </button>
+      </div>
+
+      {/* Carousel Playback Overlay */}
+      {step === 'carousel_playback' && (
+        <div className="fixed inset-0 z-40 bg-black flex flex-col">
+          <div className="flex-1 p-2 pt-16 pb-6 max-h-[92vh] max-w-[460px] mx-auto w-full">
+            {slidesToPlay.length > 0 ? (
+              <CarouselViewer
+                slides={slidesToPlay}
+                onComplete={() => {
+                  const next = nextStep();
+                  sendClientMessage(`[SYSTEM DYNAMIC INSTRUCTION]: The student has finished reviewing the visual carousel recap of the question. Please seamlessly transition to the next exam question.`);
+                }}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-zinc-400">
+                <Loader2 className="w-10 h-10 animate-spin text-amber-600 mb-4" />
+                <p className="font-medium animate-pulse">Generating your personalized review...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Visual Area */}
-      <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6">
+      <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6 pt-24">
         
         {/* Selected Image */}
         {selectedImage && (
@@ -210,15 +285,15 @@ export default function ExamEntry() {
             <span className={`text-xs font-medium ${isConnected && !isMuted ? 'text-amber-600' : 'text-zinc-500'}`}>Mic</span>
           </button>
 
-          {/* Cancel Button */}
+          {/* End Session Button instead of generic Cancel at bottom */}
           <button 
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/summary')}
             className="flex flex-col items-center gap-2 group"
           >
             <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center border border-red-100 group-hover:bg-red-100 transition-colors">
               <X size={24} className="text-red-500" />
             </div>
-            <span className="text-xs font-medium text-red-500">Cancel</span>
+            <span className="text-xs font-medium text-red-500">End Exam</span>
           </button>
 
         </div>

@@ -41,17 +41,32 @@ export default function StudyDetail() {
                     <ArrowLeft size={18} />
                     <span className="font-semibold text-sm">Library</span>
                 </button>
-                <h1 className="text-2xl font-bold tracking-tight leading-tight pr-6">{book?.title || 'Loading...'}</h1>
-
-                {book && (
-                    <div className="flex items-center gap-3 mt-3">
-                        <span className="bg-amber-100 text-amber-700 border border-amber-200 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full">
+                {/* Book Header: Subject bold + Part highlighted */}
+                {book ? (
+                    <>
+                        {/* Subject as big heading */}
+                        <h1 className="text-2xl font-bold tracking-tight leading-tight">
                             {book.subject}
-                        </span>
-                        <span className="text-sm font-medium text-zinc-500 flex items-center gap-1.5">
-                            <BookOpen size={14} /> {book.language} • {book.gradeLevel}
-                        </span>
-                    </div>
+                        </h1>
+                        {/* Part number + metadata row */}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            {/* Part pill if present */}
+                            {(() => {
+                                const part = book.title.replace(book.subject, '').trim();
+                                return part ? (
+                                    <span className="bg-amber-500 text-white text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                                        {part}
+                                    </span>
+                                ) : null;
+                            })()}
+
+                            <span className="text-sm font-medium text-zinc-500 flex items-center gap-1.5">
+                                <BookOpen size={14} /> {book.language} &bull; {book.gradeLevel} &bull; {book.numChapters} Chapters
+                            </span>
+                        </div>
+                    </>
+                ) : (
+                    <h1 className="text-2xl font-bold tracking-tight leading-tight">Loading...</h1>
                 )}
             </div>
 
@@ -66,24 +81,29 @@ export default function StudyDetail() {
                             onClick={() => navigate(`/study/${book.id}/${chapter.index}`)}
                             className="bg-white rounded-3xl p-5 border border-zinc-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all text-left flex gap-4 items-center group"
                         >
-                            <div className="w-12 h-12 bg-zinc-50 rounded-2xl border border-zinc-100 flex items-center justify-center shrink-0 group-hover:bg-amber-50 group-hover:text-amber-600 transition-colors">
-                                {chapter.index === 0 ? (
-                                    <span className="font-bold text-lg text-zinc-400">Intro</span>
-                                ) : (
-                                    <div className="flex items-center text-zinc-400 font-bold text-xl">
-                                        <Hash size={16} strokeWidth={3} className="mr-0.5 opacity-50" />
-                                        <span className="group-hover:text-amber-600">{chapter.index}</span>
-                                    </div>
-                                )}
+                            {/* Chapter number bubble */}
+                            <div className="w-12 h-12 bg-zinc-50 rounded-2xl border border-zinc-100 flex items-center justify-center shrink-0 group-hover:bg-amber-50 transition-colors">
+                                <div className="flex items-center text-zinc-400 font-bold text-xl">
+                                    <Hash size={16} strokeWidth={3} className="mr-0.5 opacity-50" />
+                                    <span className="group-hover:text-amber-600">{chapter.index}</span>
+                                </div>
                             </div>
 
                             <div className="flex-1 min-w-0 pr-4">
-                                <h3 className="font-bold text-zinc-900 group-hover:text-amber-800 transition-colors line-clamp-1 mb-1">
-                                    {chapter.title}
-                                </h3>
-                                <p className="text-xs font-medium text-zinc-500 line-clamp-2 leading-relaxed">
-                                    {chapter.summary}
+                                {/* Bold 'Chapter N' heading */}
+                                <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600 mb-0.5">
+                                    Chapter {chapter.index}
                                 </p>
+                                {/* Chapter name — strip 'Chapter N:' prefix if present */}
+                                <h3 className="font-bold text-zinc-900 group-hover:text-amber-800 transition-colors line-clamp-2 leading-snug text-sm">
+                                    {chapter.title.replace(/^Chapter\s+\d+[:\-]?\s*/i, '')}
+                                </h3>
+                                {/* Subsection range */}
+                                {chapter.subsectionRange && (
+                                    <p className="text-xs font-medium text-zinc-400 mt-1">
+                                        Subsections {chapter.subsectionRange}
+                                    </p>
+                                )}
                             </div>
 
                             <ChevronRight className="text-zinc-300 group-hover:text-amber-500 shrink-0" size={20} />

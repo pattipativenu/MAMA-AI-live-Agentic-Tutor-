@@ -21,7 +21,8 @@ export async function extractTextFromPdf(file: File): Promise<string> {
         const pageText = content.items
             .map((item: any) => ('str' in item ? item.str : ''))
             .join(' ');
-        pageTexts.push(pageText);
+        // Inject page markers so Gemini can accurately reference diagrams by page number
+        pageTexts.push(`\n--- PAGE ${i} ---\n${pageText}`);
     }
 
     return pageTexts.join('\n');

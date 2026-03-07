@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, ArrowRight, CheckCircle2, LogOut } from 'lucide-react';
 import { UserProfile } from '../../hooks/useProfile';
 
 const HOBBIES = [
@@ -31,7 +31,7 @@ const CAROUSEL_IMAGES = [
 
 export default function Onboarding() {
   const navigate = useNavigate();
-  const { currentUser, refreshProfile } = useAuth();
+  const { currentUser, refreshProfile, logout } = useAuth();
 
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<Partial<UserProfile>>({
@@ -111,20 +111,38 @@ export default function Onboarding() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (err) {
+      console.error("Failed to logout:", err);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[rgb(250,249,245)] flex flex-col justify-center items-center p-6 text-zinc-900 pb-20">
       <div className="w-full max-w-md space-y-6">
 
-        {/* Progress header */}
-        <div className="flex justify-between items-center mb-8 px-2">
+        {/* Progress header & Escape Hatch */}
+        <div className="flex justify-between items-start mb-8 px-2">
           <div className="space-y-1">
             <h1 className="text-2xl font-bold tracking-tight">Setup Profile</h1>
-            <p className="text-zinc-500 font-medium text-sm">Step {step} of 2</p>
+            <div className="flex items-center gap-3">
+              <p className="text-zinc-500 font-medium text-sm">Step {step} of 2</p>
+              <div className="flex gap-1.5">
+                <div className={`h-1.5 rounded-full w-6 ${step >= 1 ? 'bg-amber-500' : 'bg-zinc-200'}`} />
+                <div className={`h-1.5 rounded-full w-6 transition-colors duration-500 ${step >= 2 ? 'bg-amber-500' : 'bg-zinc-200'}`} />
+              </div>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <div className={`h-2 rounded-full w-8 ${step >= 1 ? 'bg-amber-500' : 'bg-zinc-200'}`} />
-            <div className={`h-2 rounded-full w-8 transition-colors duration-500 ${step >= 2 ? 'bg-amber-500' : 'bg-zinc-200'}`} />
-          </div>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-xs font-bold text-zinc-400 hover:text-red-500 transition-colors bg-white px-3 py-1.5 rounded-full border border-zinc-200 shadow-sm"
+          >
+            <LogOut size={14} />
+            Logout
+          </button>
         </div>
 
         {/* STEP 1: Basic Info */}
@@ -229,7 +247,6 @@ export default function Onboarding() {
             <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm">
               <div className="flex justify-between items-center mb-2">
                 <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2 text-zinc-800"><Gamepad2 size={16} className="text-teal-500" /> Favorite Activities</h2>
-                <button onClick={selectAllHobbies} className="text-xs font-bold text-teal-600 hover:text-teal-700">All of the above</button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {HOBBIES.map(hobby => {
@@ -249,6 +266,12 @@ export default function Onboarding() {
                     </button>
                   );
                 })}
+                <button
+                  onClick={selectAllHobbies}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl border transition-all shadow-sm bg-teal-50 border-teal-200 text-teal-700 hover:bg-teal-100`}
+                >
+                  <span className="text-xs font-bold tracking-wide">All of the above</span>
+                </button>
               </div>
             </div>
 
@@ -277,6 +300,18 @@ export default function Onboarding() {
                     </button>
                   );
                 })}
+                <button
+                  onClick={() => setFormData({ ...formData, learningStyle: 'all' })}
+                  className={`w-full flex items-center gap-4 p-3 rounded-2xl border transition-all text-left shadow-sm ${formData.learningStyle === 'all'
+                    ? 'bg-amber-50 border-amber-300'
+                    : 'bg-zinc-50 border-zinc-200'
+                    }`}
+                >
+                  <div className={`p-2 rounded-xl transition-colors ${formData.learningStyle === 'all' ? 'bg-amber-500 text-white' : 'bg-white text-zinc-400'}`}>
+                    <CheckCircle2 size={18} />
+                  </div>
+                  <span className={`font-bold text-sm ${formData.learningStyle === 'all' ? 'text-amber-900' : 'text-zinc-600'}`}>All of the above</span>
+                </button>
               </div>
             </div>
 

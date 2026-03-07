@@ -445,6 +445,20 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
     return newMuted;
   }, []);
 
+  const sendClientMessage = useCallback((text: string) => {
+    if (sessionRef.current && isConnected) {
+      console.log("[GeminiLive] Sending client message:", text);
+      sessionRef.current.send({
+        clientContent: {
+          turns: [{ role: 'user', parts: [{ text }] }],
+          turnComplete: true
+        }
+      });
+      // Add to local message list securely so we see it in debug logs
+      setMessages(prev => [...prev, { role: 'user', text: `*[System]* ${text}` }]);
+    }
+  }, [isConnected]);
+
   return {
     isConnected,
     isConnecting,
@@ -456,6 +470,7 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
     isGeneratingImage,
     connect,
     disconnect,
-    toggleMute
+    toggleMute,
+    sendClientMessage
   };
 }

@@ -9,6 +9,7 @@ import Sessions from './pages/Sessions';
 import StudyLibrary from './pages/study/StudyLibrary';
 import StudyDetail from './pages/study/StudyDetail';
 import TutorChat from './pages/study/TutorChat';
+import Summary from './pages/summary/Summary';
 
 import Login from './pages/auth/Login';
 import Signup from './pages/auth/Signup';
@@ -96,6 +97,7 @@ export default function App() {
           <Route path="/exam/entry" element={<ExamEntry />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/summary" element={<Summary />} />
           <Route path="/study" element={<StudyLibrary />} />
           <Route path="/study/:bookId" element={<StudyDetail />} />
           <Route path="/study/:bookId/:chapterIndex" element={<TutorChat />} />
