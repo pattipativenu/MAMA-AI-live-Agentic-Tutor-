@@ -1,12 +1,12 @@
 <div align="center">
-<img width="1200" height="auto" alt="Mama AI Banner" src="./public/assets/mama_ai_banner.png" />
+<img width="1200" height="auto" alt="Mama AI Banner" src="./public/assets/mama_ai_banner_final.png" />
 
 # Mama AI: The Multimodal "Private Tutor"
 **Built for the Google Gemini Live Agent Challenge**
 </div>
 
 ## 🌟 Overview
-Mama AI is not a generic input, typing input, output text chatbot. It is a multi-modal learning companion designed specifically for students. It moves far beyond the text box paradigm by allowing students to converse naturally with an AI tutor that can hear their voice, see their physical science experiments through the camera, and dynamically generate a visual diagram or instructional video (via Google Veo) on the fly to explain complex components.
+Mama AI is not a generic input, typing input, output text chatbot. It is a multi-modal learning companion designed specifically for students. It moves far beyond the text box paradigm by allowing students to converse naturally with an AI tutor that can see, hear, respond, and generate dynamic visual diagrams or instructional videos (via Google Veo) on the fly to explain complex components.
 
 The application is built on a responsive, mobile-first React architecture, making it feel like a native app where the student's camera, microphone, and touchscreen are the primary input modalities.
 

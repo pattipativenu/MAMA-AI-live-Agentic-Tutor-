@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut } from 'lucide-react';
+import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, Mic, PlaySquare, Settings as SettingsIcon } from 'lucide-react';
 import { UserProfile } from '../hooks/useProfile';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc } from 'firebase/firestore';
@@ -25,13 +25,21 @@ const LEARNING_STYLES = [
   { id: 'kinesthetic', label: 'Kinesthetic (Doing & Hands-on)', icon: Hand },
 ];
 
+const THEMES = [
+  { id: 'realistic', label: 'Realistic', icon: Camera },
+  { id: 'space', label: 'Space / Sci-Fi', icon: Rocket },
+  { id: 'anime', label: 'Anime', icon: Sparkles },
+  { id: 'historical', label: 'Historical', icon: Landmark },
+  { id: 'action', label: 'Action / Adventure', icon: Zap }
+];
+
 export default function Settings() {
   const navigate = useNavigate();
   const { userProfile, currentUser, refreshProfile, logout } = useAuth();
 
-  const [formData, setFormData] = useState<UserProfile>(userProfile || { name: '', age: '', gender: '', hobbies: [], learningStyle: '' });
+  const [formData, setFormData] = useState<UserProfile>(userProfile || { name: '', age: '', gender: '', hobbies: [], learningStyle: '', theme: 'realistic', voiceSpeed: 'normal', autoAdvanceCarousel: true });
   const [saved, setSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState<'account' | 'profile'>('account');
+  const [activeTab, setActiveTab] = useState<'account' | 'profile' | 'preferences'>('account');
 
   useEffect(() => {
     if (userProfile) {
@@ -94,17 +102,24 @@ export default function Settings() {
         <div className="flex p-1 bg-zinc-100/80 rounded-2xl w-full max-w-sm mx-auto shadow-inner border border-zinc-200/50">
           <button
             onClick={() => setActiveTab('account')}
-            className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${activeTab === 'account' ? 'bg-white shadow-sm text-amber-600' : 'text-zinc-500 hover:text-zinc-700'
+            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === 'account' ? 'bg-white shadow-sm text-amber-600' : 'text-zinc-500 hover:text-zinc-700'
               }`}
           >
-            Account Details
+            Account
           </button>
           <button
             onClick={() => setActiveTab('profile')}
-            className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${activeTab === 'profile' ? 'bg-white shadow-sm text-teal-600' : 'text-zinc-500 hover:text-zinc-700'
+            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === 'profile' ? 'bg-white shadow-sm text-teal-600' : 'text-zinc-500 hover:text-zinc-700'
               }`}
           >
-            Student Profile
+            Profile
+          </button>
+          <button
+            onClick={() => setActiveTab('preferences')}
+            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === 'preferences' ? 'bg-white shadow-sm text-[#fe9900]' : 'text-zinc-500 hover:text-zinc-700'
+              }`}
+          >
+            Preferences
           </button>
         </div>
       </div>
@@ -261,6 +276,86 @@ export default function Settings() {
                 })}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* --- PREFERENCES TAB --- */}
+        {activeTab === 'preferences' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+
+            <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm">
+              <div className="flex items-center gap-2 text-zinc-800">
+                <SettingsIcon size={18} className="text-[#fe9900]" />
+                <h2 className="text-sm font-bold uppercase tracking-wider">Visual Theme</h2>
+              </div>
+              <p className="text-xs text-zinc-500 font-medium leading-relaxed">
+                Choose the visual style Mama AI uses for your auto-generated diagrams and videos.
+              </p>
+              <div className="space-y-2 pt-2">
+                {THEMES.map(theme => {
+                  const Icon = theme.icon;
+                  const isSelected = formData.theme === theme.id || (!formData.theme && theme.id === 'realistic');
+                  return (
+                    <button
+                      key={theme.id}
+                      onClick={() => setFormData({ ...formData, theme: theme.id as any })}
+                      className={`w-full flex items-center gap-4 p-3 rounded-2xl border transition-all text-left shadow-sm group ${isSelected
+                        ? 'bg-[#fe9900]/10 border-[#fe9900]/30 text-[#fe9900]'
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-600 hover:border-[#fe9900]/30 hover:bg-[#fe9900]/10'
+                        }`}
+                    >
+                      <div className={`p-2 rounded-xl transition-colors ${isSelected ? 'bg-[#fe9900] text-white shadow-sm' : 'bg-white border border-zinc-200 text-zinc-400 group-hover:text-[#fe9900]'}`}>
+                        <Icon size={16} />
+                      </div>
+                      <span className={`font-bold text-sm ${isSelected ? 'text-[#cc7a00]' : 'text-zinc-600'}`}>{theme.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm">
+              <div className="flex items-center gap-2 text-zinc-800 mb-2">
+                <Mic size={18} className="text-[#fe9900]" />
+                <h2 className="text-sm font-bold uppercase tracking-wider">Voice Speed</h2>
+              </div>
+              <div className="flex p-1 bg-zinc-100/80 rounded-2xl w-full shadow-inner border border-zinc-200/50">
+                {(['slow', 'normal', 'fast'] as const).map(speed => (
+                  <button
+                    key={speed}
+                    onClick={() => setFormData({ ...formData, voiceSpeed: speed })}
+                    className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all capitalize ${(formData.voiceSpeed || 'normal') === speed
+                      ? 'bg-white shadow-sm text-[#fe9900]'
+                      : 'text-zinc-500 hover:text-zinc-700'
+                      }`}
+                  >
+                    {speed}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm flex items-center justify-between">
+              <div className="pr-4">
+                <div className="flex items-center gap-2 text-zinc-800 mb-1">
+                  <PlaySquare size={18} className="text-[#fe9900]" />
+                  <h2 className="text-sm font-bold uppercase tracking-wider">Auto-Advance Carousel</h2>
+                </div>
+                <p className="text-xs text-zinc-500 font-medium leading-relaxed">
+                  Automatically move to the next slide when Mama AI finishes explaining it.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setFormData({ ...formData, autoAdvanceCarousel: formData.autoAdvanceCarousel === undefined ? false : !formData.autoAdvanceCarousel })}
+                className={`w-14 h-8 flex items-center rounded-full p-1 transition-colors shrink-0 ${(formData.autoAdvanceCarousel !== false) ? 'bg-[#fe9900]' : 'bg-zinc-300'
+                  }`}
+              >
+                <div className={`bg-white w-6 h-6 rounded-full shadow-sm transform transition-transform ${(formData.autoAdvanceCarousel !== false) ? 'translate-x-6' : 'translate-x-0'
+                  }`} />
+              </button>
+            </div>
+
           </div>
         )}
 

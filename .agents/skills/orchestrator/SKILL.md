@@ -24,6 +24,6 @@ The Orchestrator coordinates the specialized sub-agents:
 - **Pilot (User Interaction):** Standard Home/Settings navigation.
 - **Surveyor (Vision/Live):** Skill A & B execution.
 - **Scholar (Reasoning):** Skill C & E execution.
-- **Artist (Creation):** Skill D execution (Banana/Veo/Live TTS).
+- **Artist (Creation):** Skill D execution (`gemini-3-pro-image-preview` for high quality visuals, `gemini-3.1-flash-image-preview` for fast visuals, `veo-3.1-generate-preview` for video).
 
 The Orchestrator ensures that no two models attempt to control the UI simultaneously (e.g., Storytelling Carousel should not run while the Live Mic is active in a different mode).

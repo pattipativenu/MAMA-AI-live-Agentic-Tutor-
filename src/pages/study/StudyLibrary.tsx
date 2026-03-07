@@ -4,6 +4,7 @@ import { Upload, Book, Trash2, Loader2, ChevronRight, FileX } from 'lucide-react
 import { useTextbookParser } from '../../hooks/useTextbookParser';
 import { extractTextFromPdf } from '../../utils/pdfExtractor';
 import { extractTextFromEpub } from '../../utils/epubExtractor';
+import { extractChaptersFromZip } from '../../utils/zipExtractor';
 import { useProfile } from '../../hooks/useProfile';
 
 export default function StudyLibrary() {
@@ -26,8 +27,8 @@ export default function StudyLibrary() {
 
         setUploadError(null);
 
-        if (file.type !== 'application/pdf' && file.type !== 'application/epub+zip' && !file.name.endsWith('.epub')) {
-            setUploadError("Please upload a valid PDF or EPUB file.");
+        if (file.type !== 'application/pdf' && file.type !== 'application/epub+zip' && !file.name.endsWith('.epub') && file.type !== 'application/zip' && !file.name.endsWith('.zip')) {
+            setUploadError("Please upload a valid PDF, EPUB, or ZIP file.");
             return;
         }
 
@@ -40,16 +41,13 @@ export default function StudyLibrary() {
         try {
             let text = '';
             let preParsedChapters = undefined;
+            let bookTitleHint: string | undefined = undefined;
 
             if (file.type === 'application/epub+zip' || file.name.endsWith('.epub')) {
                 // Extract chapters natively from EPUB structure
                 const extracted = await extractTextFromEpub(file);
                 if (extracted.length === 0) throw new Error("Could not extract any text from this EPUB.");
 
-                // We don't need raw text for Gemini chapter parsing if we already have the chapters,
-                // but we still need Gemini to detect the Title, Subject, and GradeLevel.
-                // So we pass the first chapter's text to Gemini to classify the book metadata,
-                // but we pass `preParsedChapters` to bypass the Gemini chapter division logic.
                 text = extracted.map(c => `${c.title}\n${c.text.substring(0, 1000)}`).join('\n\n');
                 preParsedChapters = extracted.map((c, i) => ({
                     index: i + 1,
@@ -57,13 +55,24 @@ export default function StudyLibrary() {
                     summary: c.text.substring(0, 100) + '...',
                     content: c.text
                 }));
+            } else if (file.type === 'application/zip' || file.name.endsWith('.zip')) {
+                // Smart ZIP extraction: classifies chapters/answers/prelims automatically
+                const extracted = await extractChaptersFromZip(file);
+                text = extracted.text;
+                preParsedChapters = extracted.chapters;
+                bookTitleHint = extracted.bookTitleHint || undefined;
+                const gradeLevelHintZip = extracted.gradeLevelHint || undefined;
+                // 2. Parse metadata and save to Storage/Firestore (pass hints from prelims)
+                const book = await parseAndSave(text, file.name, profile?.uid, preParsedChapters, bookTitleHint, gradeLevelHintZip);
+                if (book) { navigate(`/study/${book.id}`); } else { setUploadError('Failed to parse the textbook. Could not extract chapter structure.'); }
+                return; // early return — we already called parseAndSave
             } else {
-                // 1. Extract raw text client-side for PDF
+                // 1. Extract raw text client-side for single PDF
                 text = await extractTextFromPdf(file);
             }
 
             // 2. Parse metadata and save to Storage/Firestore
-            const book = await parseAndSave(text, file.name, profile?.uid, preParsedChapters);
+            const book = await parseAndSave(text, file.name, profile?.uid, preParsedChapters, bookTitleHint);
 
             if (book) {
                 // Automatically navigate to the newly parsed book
@@ -72,7 +81,8 @@ export default function StudyLibrary() {
                 setUploadError("Failed to parse the textbook. The AI could not detect chapter boundaries.");
             }
         } catch (err: any) {
-            setUploadError(err.message || "An error occurred while reading the PDF.");
+            console.error("Upload error:", err);
+            setUploadError(err.message || "An error occurred while processing the file.");
         }
     };
 
@@ -82,6 +92,9 @@ export default function StudyLibrary() {
             case 'chemistry': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
             case 'biology': return 'bg-rose-100 text-rose-700 border-rose-200';
             case 'math': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+            case 'accountancy': return 'bg-amber-100 text-amber-700 border-amber-200';
+            case 'biotechnology': return 'bg-teal-100 text-teal-700 border-teal-200';
+            case 'computer science': return 'bg-purple-100 text-purple-700 border-purple-200';
             default: return 'bg-zinc-100 text-zinc-700 border-zinc-200';
         }
     };
@@ -117,14 +130,14 @@ export default function StudyLibrary() {
                             <Upload size={28} />
                         </div>
                         <h3 className="font-bold text-lg text-zinc-800">Upload a Textbook</h3>
-                        <p className="text-sm text-zinc-500 mt-1 text-center max-w-[200px]">PDF or EPUB format. Mama AI will smartly process chapters.</p>
+                            <p className="text-sm text-zinc-500 mt-1 text-center max-w-[200px]">PDF, EPUB, or ZIP format. Mama AI will smartly process chapters.</p>
                     </>
                 )}
             </div>
 
             <input
                 type="file"
-                accept="application/pdf,.epub,application/epub+zip"
+                accept="application/pdf,.epub,application/epub+zip,application/zip,.zip"
                 ref={fileInputRef}
                 onChange={handleFileUpload}
                 className="hidden"
@@ -170,15 +183,23 @@ export default function StudyLibrary() {
                             </div>
 
                             <div className="flex-1 min-w-0 pr-8">
-                                <h3 className="font-bold text-zinc-900 truncate">{book.title}</h3>
-                                <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                                    <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${getSubjectColor(book.subject)}`}>
-                                        {book.subject}
-                                    </span>
-                                    <span className="text-xs font-medium text-zinc-500">
-                                        {book.gradeLevel} • {book.numChapters} Chapters
-                                    </span>
-                                </div>
+                                {/* Subject is the main heading */}
+                                <h3 className="font-bold text-zinc-900 text-base truncate">
+                                    {book.subject}
+                                </h3>
+                                {/* Part number (e.g. "Part I") — extracted from title by stripping subject name */}
+                                {(() => {
+                                    const part = book.title
+                                        .replace(book.subject, '')
+                                        .trim();
+                                    return part ? (
+                                        <p className="text-sm font-semibold text-amber-600 mt-0.5">{part}</p>
+                                    ) : null;
+                                })()}
+                                {/* Grade + chapters */}
+                                <p className="text-xs font-medium text-zinc-400 mt-1">
+                                    {book.gradeLevel} &bull; {book.numChapters} Chapters
+                                </p>
                             </div>
 
                             <ChevronRight className="text-zinc-300 shrink-0" size={24} />

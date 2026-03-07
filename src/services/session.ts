@@ -1,5 +1,5 @@
 import { collection, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "./firebase";
+import { db } from "../firebase";
 
 export async function createTestSession(userId: string) {
   const sessionId = `test_${Date.now()}`;

@@ -7,9 +7,12 @@ export interface UserProfile {
   hobbies: string[];
   learningStyle: string;
   password?: string;
+  theme?: 'realistic' | 'space' | 'anime' | 'historical' | 'action';
+  voiceSpeed?: 'slow' | 'normal' | 'fast';
+  autoAdvanceCarousel?: boolean;
 }
 
-const DEFAULT_PROFILE: UserProfile = { name: '', gender: '', age: '', hobbies: [], learningStyle: '', password: '' };
+const DEFAULT_PROFILE: UserProfile = { name: '', gender: '', age: '', hobbies: [], learningStyle: '', password: '', theme: 'realistic', voiceSpeed: 'normal', autoAdvanceCarousel: true };
 
 export function useProfile() {
   const [profile, setProfile] = useState<UserProfile>(() => {

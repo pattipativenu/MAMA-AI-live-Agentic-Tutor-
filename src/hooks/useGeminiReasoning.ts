@@ -49,13 +49,29 @@ export function useGeminiReasoning() {
                 required: ["correct", "missing", "incorrect", "hooks"]
             };
 
-            const systemInstruction = "You are an expert pedagogical evaluator. Analyze the student's transcript and evaluate their understanding. Output strict JSON according to the schema.";
+            const systemInstruction = `
+<system_instruction>
+  <identity>
+    <role>Expert Pedagogical Evaluator</role>
+    <task>Analyze student transcripts, identify knowledge gaps, and generate memory hooks.</task>
+  </identity>
+
+  <rules>
+    <rule>You must evaluate the student's understanding based strictly on the provided transcript.</rule>
+    <rule>You must output your evaluation EXCLUSIVELY in valid JSON format according to the requested schema. No conversational filler text.</rule>
+  </rules>
+  
+  <output_requirements>
+    <memory_hooks>Generate 3-5 memorable, visual hooks (analogies or mnemonic images) that will act as mental anchors for the student to remember the concepts they missed or got incorrect.</memory_hooks>
+  </output_requirements>
+</system_instruction>
+`.trim();
 
             // Attempt primary model first
             let response;
             try {
                 response = await ai.models.generateContent({
-                    model: 'gemini-3.1-pro',
+                    model: 'gemini-3-pro-preview',
                     contents: [{ role: 'user', parts: [{ text: transcript }] }],
                     config: {
                         systemInstruction: systemInstruction,
@@ -65,9 +81,9 @@ export function useGeminiReasoning() {
                     }
                 });
             } catch (e: any) {
-                console.warn("[useGeminiReasoning] Primary model failed, falling back to gemini-3-pro...", e);
+                console.warn("[useGeminiReasoning] Primary model failed, falling back to gemini-2.5-pro...", e);
                 response = await ai.models.generateContent({
-                    model: 'gemini-3-pro',
+                    model: 'gemini-2.5-pro',
                     contents: [{ role: 'user', parts: [{ text: transcript }] }],
                     config: {
                         systemInstruction: systemInstruction,

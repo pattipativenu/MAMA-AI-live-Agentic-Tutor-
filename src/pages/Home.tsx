@@ -1,16 +1,22 @@
 import { Beaker, BookOpen, Star, Microscope, Pencil, Clock, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useProfile } from '../hooks/useProfile';
+import { useAuth } from '../contexts/AuthContext';
 import { useSessions } from '../hooks/useSessions';
 
 export default function Home() {
   const navigate = useNavigate();
-  const { profile } = useProfile();
+  const { userProfile } = useAuth();
   const { sessions } = useSessions();
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    const name = profile.name || 'Student';
+    let name = 'Student';
+    if (userProfile?.name) {
+      const rawName = userProfile.name.trim();
+      if (rawName) {
+        name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+      }
+    }
     
     if (hour >= 22 || hour < 4) {
       return { line1: "Burning the midnight oil,", line2: `${name}!` };
@@ -24,7 +30,7 @@ export default function Home() {
   };
 
   const greeting = getGreeting();
-  const initial = profile.name ? profile.name.charAt(0).toUpperCase() : 'S';
+  const initial = userProfile?.name ? userProfile.name.trim().charAt(0).toUpperCase() : 'S';
 
   return (
     <div className="flex flex-col gap-8 p-6 pt-12">
