@@ -5,21 +5,21 @@ import { useTextbookParser } from '../../hooks/useTextbookParser';
 import { extractTextFromPdf } from '../../utils/pdfExtractor';
 import { extractTextFromEpub } from '../../utils/epubExtractor';
 import { extractChaptersFromZip } from '../../utils/zipExtractor';
-import { useProfile } from '../../hooks/useProfile';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function StudyLibrary() {
     const navigate = useNavigate();
-    const { profile } = useProfile();
+    const { currentUser } = useAuth();
     const { textbooks, isParsing, parseProgress, isLoadingBooks, loadTextbooks, parseAndSave, deleteTextbook } = useTextbookParser();
 
     const [uploadError, setUploadError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-        // We pass profile.uid to load books from Firestore.
+        // We pass currentUser.uid to load books from Firestore.
         // If null, it falls back to localStorage.
-        loadTextbooks(profile?.uid);
-    }, [loadTextbooks, profile?.uid]);
+        loadTextbooks(currentUser?.uid);
+    }, [loadTextbooks, currentUser?.uid]);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -63,7 +63,7 @@ export default function StudyLibrary() {
                 bookTitleHint = extracted.bookTitleHint || undefined;
                 const gradeLevelHintZip = extracted.gradeLevelHint || undefined;
                 // 2. Parse metadata and save to Storage/Firestore (pass hints from prelims)
-                const book = await parseAndSave(text, file.name, profile?.uid, preParsedChapters, bookTitleHint, gradeLevelHintZip);
+                const book = await parseAndSave(text, file.name, currentUser?.uid, preParsedChapters, bookTitleHint, gradeLevelHintZip);
                 if (book) { navigate(`/study/${book.id}`); } else { setUploadError('Failed to parse the textbook. Could not extract chapter structure.'); }
                 return; // early return — we already called parseAndSave
             } else {
@@ -72,7 +72,7 @@ export default function StudyLibrary() {
             }
 
             // 2. Parse metadata and save to Storage/Firestore
-            const book = await parseAndSave(text, file.name, profile?.uid, preParsedChapters, bookTitleHint);
+            const book = await parseAndSave(text, file.name, currentUser?.uid, preParsedChapters, bookTitleHint);
 
             if (book) {
                 // Automatically navigate to the newly parsed book
@@ -169,7 +169,7 @@ export default function StudyLibrary() {
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     if (confirm(`Delete '${book.title}' from your library?`)) {
-                                        deleteTextbook(book.id, profile?.uid);
+                                        deleteTextbook(book.id, currentUser?.uid);
                                     }
                                 }}
                                 className="absolute top-3 right-3 p-2 bg-red-50 text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"

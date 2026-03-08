@@ -11,9 +11,9 @@ export const getLabSystemInstruction = (profile: UserProfile) => {
     profileContext = `\n\n--- STUDENT PROFILE ---\n`;
     if (profile.age) profileContext += `Age/Grade: ${profile.age}\n`;
     if (profile.gender) profileContext += `Gender: ${profile.gender}\n`;
-    if (profile.hobbies.length > 0) profileContext += `Favorite Activities/Hobbies: ${profile.hobbies.join(', ')}\n`;
+    if (profile.hobbies.length > 0) profileContext += `Favourite Activities/Hobbies: ${profile.hobbies.join(', ')}\n`;
     if (profile.learningStyle) profileContext += `Preferred Learning Style: ${profile.learningStyle}\n`;
-    profileContext += `DO NOT ask the student for this information again, you already know it. Tailor all your examples, analogies, and image generation prompts specifically to their age, gender, and favorite activities.\n`;
+    profileContext += `DO NOT ask the student for this information again, you already know it. Tailor all your examples, analogies, and image generation prompts specifically to their age, gender, and favourite activities.\n`;
   }
 
   return `
@@ -21,17 +21,17 @@ export const getLabSystemInstruction = (profile: UserProfile) => {
       The student is entering "Lab Mode". You teach Science (Physics, Chemistry, Biology) and Math.
       ${profileContext}
       CRITICAL TEACHING RULES:
-      1. AGE & PERSONALIZATION FIRST: Politely ask the student for their age/grade, gender, and their favorite activity/hobby (e.g., a sport, reading, drawing) before explaining complex topics ONLY IF it is not provided in the profile above. DO NOT assume their favorite activity. Use their chosen activity to personalize your examples.
+      1. AGE & PERSONALIZATION FIRST: Politely ask the student for their age/grade, gender, and their favourite activity/hobby (e.g., a sport, reading, drawing) before explaining complex topics ONLY IF it is not provided in the profile above. DO NOT assume their favourite activity. Use their chosen activity to personalise your examples.
       2. REAL-WORLD FIRST: Whenever you explain a concept, you MUST first use a simple, relatable real-world example tailored to their age and chosen activity.
       3. SCIENCE/MATH SECOND: Only after the real-world example should you explain the formal language, formulas, and principles.
       4. INTERACTIVE LEARNING: Encourage the student to perform simple, physical actions to understand concepts. Also, ask them to write down formulas or draw diagrams on a piece of paper.
-      5. VISUAL AIDS (CRITICAL): When explaining dimensions, geometry, or any visual concept, you MUST use the \`generate_image\` tool. 
+      5. VISUAL AIDS (CRITICAL): When explaining dimensions, geometry, or any visual concept, you MUST use the \`generate_image\` tool.
          - The image prompt MUST be highly detailed, including specific measurements, dimensions, labels, etc.
          - Tailor the visual complexity to their age: for young kids, use simple, fun visuals without complex formulas. For older teens (Class 11/12), include advanced formulas, vectors, or graphs.
          - NEVER include the text "Class X" or the student's grade in the image prompt text.
          - Tell the user you are generating an image for them.
       6. QUIZ & VERIFY: After explaining, ask if they understood. If they say yes, give them a quick quiz question to test their knowledge. If they answer incorrectly, gently point out what they got right, where they went wrong, and explain it again clearly.
-      
+
       CRITICAL SAFETY RULE:
       If you ask the student to pick up, throw, or use an object, you MUST explicitly specify safe, non-harmful objects (like paper, a feather, or a soft pillow). NEVER suggest or allow the use of heavy, sharp, or breakable objects (like glass, phones, scissors, or hard plastics). You must actively ensure their physical safety in your suggestions.
 
@@ -48,6 +48,9 @@ export default function LabEntry() {
   const { profile } = useProfile();
   const { sessions, saveSession } = useSessions();
 
+  // Stable session ID — generated once at mount
+  const sessionIdRef = useRef(Date.now().toString());
+
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isVideoActive, setIsVideoActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -56,8 +59,12 @@ export default function LabEntry() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const { isConnected, isConnecting, status, messages, isSilent, isMuted, currentImage, isGeneratingImage, connect, disconnect, toggleMute } = useGeminiLive((msgs) => {
-    saveSession('lab', msgs);
+  const {
+    isConnected, isConnecting, isSilent, isMuted,
+    currentImage, isGeneratingImage,
+    connect, disconnect, toggleMute,
+  } = useGeminiLive((msgs) => {
+    saveSession('lab', msgs, sessionIdRef.current);
   });
 
   useEffect(() => {
@@ -101,10 +108,6 @@ export default function LabEntry() {
   const toggleVideo = () => {
     if (isVideoActive) {
       stopVideo();
-      // If we stop video, we might want to stay connected but without video. 
-      // For simplicity, we can just disconnect and reconnect, or just stop the video stream.
-      // Since video is sent via interval, stopping the stream will just send black frames or stop sending.
-      // Better to disconnect and let user reconnect.
       disconnect();
     } else {
       startVideo();
@@ -127,7 +130,6 @@ export default function LabEntry() {
         const base64 = reader.result as string;
         setSelectedImage(base64);
         stopVideo();
-        // Automatically connect when image is selected
         handleConnect(base64, null);
       };
       reader.readAsDataURL(file);
@@ -139,11 +141,15 @@ export default function LabEntry() {
     let previousMessages;
     if (resumeId) {
       const session = sessions.find(s => s.id === resumeId);
-      if (session) {
-        previousMessages = session.messages;
-      }
+      if (session) previousMessages = session.messages;
     }
     connect(instruction, previousMessages, image, videoEl);
+  };
+
+  const handleEndSession = () => {
+    stopVideo();
+    disconnect(); // triggers saveSession callback
+    navigate(`/summary?sessionId=${sessionIdRef.current}&mode=lab`);
   };
 
   return (
@@ -293,15 +299,15 @@ export default function LabEntry() {
             <span className={`text-xs font-medium ${isConnected && !isMuted ? 'text-teal-600' : 'text-zinc-500'}`}>Mic</span>
           </button>
 
-          {/* Cancel Button */}
+          {/* End Session Button */}
           <button
-            onClick={() => navigate('/')}
+            onClick={handleEndSession}
             className="flex flex-col items-center gap-2 group"
           >
             <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center border border-red-100 group-hover:bg-red-100 transition-colors">
               <X size={24} className="text-red-500" />
             </div>
-            <span className="text-xs font-medium text-red-500">Cancel</span>
+            <span className="text-xs font-medium text-red-500">End</span>
           </button>
 
         </div>

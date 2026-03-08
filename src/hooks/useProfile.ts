@@ -1,29 +1,29 @@
-import { useState } from 'react';
+/**
+ * useProfile.ts — Thin wrapper over AuthContext.
+ * Profile data lives in Firestore (users/{uid}); zero localStorage.
+ * Re-exports UserProfile + DEFAULT_PROFILE for backward-compat imports.
+ */
+export type { UserProfile } from '../types/profile';
+export { DEFAULT_PROFILE } from '../types/profile';
 
-export interface UserProfile {
-  name: string;
-  gender: string;
-  age: string;
-  hobbies: string[];
-  learningStyle: string;
-  password?: string;
-  theme?: 'realistic' | 'space' | 'anime' | 'historical' | 'action';
-  voiceSpeed?: 'slow' | 'normal' | 'fast';
-  autoAdvanceCarousel?: boolean;
-}
-
-const DEFAULT_PROFILE: UserProfile = { name: '', gender: '', age: '', hobbies: [], learningStyle: '', password: '', theme: 'realistic', voiceSpeed: 'normal', autoAdvanceCarousel: true };
+import { useAuth } from '../contexts/AuthContext';
+import { saveProfileToDb } from '../services/dataStore';
+import { UserProfile, DEFAULT_PROFILE } from '../types/profile';
 
 export function useProfile() {
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('mama_ai_profile');
-    return saved ? JSON.parse(saved) : DEFAULT_PROFILE;
-  });
+  const { userProfile, currentUser, refreshProfile } = useAuth();
 
-  const saveProfile = (newProfile: UserProfile) => {
-    setProfile(newProfile);
-    localStorage.setItem('mama_ai_profile', JSON.stringify(newProfile));
+  const saveProfile = async (newProfile: UserProfile): Promise<void> => {
+    if (!currentUser) {
+      console.warn('[useProfile] Cannot save profile — no authenticated user.');
+      return;
+    }
+    await saveProfileToDb(currentUser.uid, newProfile);
+    await refreshProfile();
   };
 
-  return { profile, saveProfile };
+  return {
+    profile: (userProfile ?? DEFAULT_PROFILE) as UserProfile,
+    saveProfile,
+  };
 }

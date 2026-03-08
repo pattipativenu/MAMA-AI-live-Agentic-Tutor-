@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { auth, db } from '../firebase';
 import { User, onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { UserProfile } from '../hooks/useProfile';
+import { UserProfile } from '../types/profile';  // canonical source of truth
 
 interface AuthContextType {
   currentUser: User | null;

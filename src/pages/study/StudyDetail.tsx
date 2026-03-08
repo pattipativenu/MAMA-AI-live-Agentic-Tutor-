@@ -2,20 +2,20 @@ import { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, BookOpen, ChevronRight, Hash } from 'lucide-react';
 import { useTextbookParser } from '../../hooks/useTextbookParser';
-import { useProfile } from '../../hooks/useProfile';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function StudyDetail() {
     const { bookId } = useParams<{ bookId: string }>();
     const navigate = useNavigate();
-    const { profile } = useProfile();
+    const { currentUser } = useAuth();
     const { textbooks, loadTextbooks } = useTextbookParser();
 
     // Load books if accessing this route directly
     useEffect(() => {
         if (textbooks.length === 0) {
-            loadTextbooks(profile?.uid);
+            loadTextbooks(currentUser?.uid);
         }
-    }, [textbooks.length, loadTextbooks, profile?.uid]);
+    }, [textbooks.length, loadTextbooks, currentUser?.uid]);
 
     const book = useMemo(() =>
         textbooks.find(b => b.id === bookId),

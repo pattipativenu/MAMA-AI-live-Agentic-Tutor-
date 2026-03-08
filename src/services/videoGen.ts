@@ -13,20 +13,64 @@ export interface VideoGenerationOptions {
   age?: string;
   theme?: string;
   aspectRatio?: '16:9' | '9:16'; // 9:16 for mobile portrait
-  resolution?: '720p' | '1080p' | '4k';
+  resolution?: '720p' | '1080p';
 }
 
-function buildVideoPrompt(concept: string, age: string): string {
+// ── Per-theme aesthetic finishing ────────────────────────────────────────────
+
+const VIDEO_THEME_AESTHETICS: Record<string, string> = {
+  realistic:
+    'Photorealistic render with scientific accuracy. Neutral gradient or contextual real-world backdrop. Natural cinematic colour grade — warm highlights, cool shadows, subtle film grain.',
+  space:
+    'Cinematic deep-space aesthetic with neon energy particles, glowing orbital paths, and volumetric light shafts cutting through a dark cosmic backdrop. Vibrant blues, cyans, and purples.',
+  anime:
+    'Vibrant cel-shaded anime style with expressive motion lines, speed streaks, and a warm inviting colour palette. Soft bokeh environment, Studio Ghibli-inspired warmth.',
+  historical:
+    'Sepia-toned vintage film style. Warm amber tones, aged parchment textures, and a slightly desaturated palette that evokes a scholarly historical document.',
+  action:
+    'High-contrast comic-book aesthetic. Bold thick outlines, explosive speed lines, impact-star bursts, and dramatic directional lighting that screams kinetic energy.',
+};
+
+// ── Prompt builder (Veo guide: 5-part formula, 100–150 words, 8-second map) ──
+
+/**
+ * Builds a Veo-optimised video prompt following the official prompting guide:
+ *  1. Shot Composition  — camera angle, distance, movement
+ *  2. Subject Details   — scientific accuracy, colour, texture
+ *  3. Action Sequence   — explicit 8-second play-by-play
+ *  4. Setting           — minimal, contextual, never distracting
+ *  5. Aesthetics & Mood — colour grade, theme style, satisfying resolution
+ *
+ * Target length: ~100–150 words.
+ * No dialogue, no voiceover, no text overlays.
+ */
+function buildVideoPrompt(concept: string, age: string, theme?: string): string {
+  const audienceNote = age
+    ? `Calibrated for a ${age} student — visually engaging and clear without being oversimplified.`
+    : 'Visually clear and appropriately detailed for high-school students.';
+
+  const aesthetic =
+    (theme && VIDEO_THEME_AESTHETICS[theme]) ?? VIDEO_THEME_AESTHETICS.realistic;
+
   return `
-    Educational animation demonstrating: "${concept}".
-    ${age ? `Designed for a ${age} student to understand easily.` : ''}
-    Clear visual demonstration, well-lit, photorealistic or high-quality 3D render.
-    No text overlays. Focus entirely on the concept.
-  `;
+An 8-second silent educational animation demonstrating: "${concept}".
+
+SHOT COMPOSITION: Opens (0–2 s) with a clean wide establishing shot that immediately frames all key elements of ${concept}. Camera slowly pushes in, building focus on the central subject.
+
+SUBJECT DETAILS: ${concept} depicted with scientific accuracy — vibrant colour-coded components, crisp edges, and clear spatial relationships between all interacting parts. Every element visually distinct.
+
+ACTION SEQUENCE (2–6 s): The core physical process within "${concept}" unfolds through a smooth, deliberate sequence. Motion blur, flow lines, and particle effects highlight direction of movement, energy transfer, or transformation. Cause and effect are unmistakable.
+
+SETTING: Clean, minimal environment. ${audienceNote}
+
+AESTHETICS & MOOD (6–8 s): ${aesthetic} Final frames show the concept's key outcome with a satisfying visual resolution — gentle pull-back or slow-motion freeze that encapsulates the core insight.
+
+CRITICAL: No dialogue. No voiceover. No text overlays. No captions. Silent visual animation only.
+  `.trim();
 }
 
 /**
- * Generates video using Veo 3.1
+ * Generates video using Veo 3 (video-only — no native audio track).
  * NOTE: This is an async operation that requires polling.
  * Returns Firebase Storage URL when complete.
  */
@@ -38,16 +82,16 @@ export async function generateEducationalVideo(
 ): Promise<string> {
   const {
     age = '',
+    theme = 'realistic',
     aspectRatio = '9:16', // Mobile portrait for Mama AI
-    resolution = '720p'
   } = options;
 
-  const prompt = buildVideoPrompt(concept, age);
+  const prompt = buildVideoPrompt(concept, age, theme);
   console.log(`[VideoGen] Starting Veo generation for: ${concept}`);
 
-  // Start video generation
+  // Start video generation — veo-3-generate produces video without native audio
   const operation = await ai.models.generateVideos({
-    model: 'veo-3.1-generate-preview',
+    model: 'veo-3-generate',
     prompt,
     config: {
       aspectRatio,
