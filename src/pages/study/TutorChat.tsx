@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Camera, X, ArrowLeft, Mic, MicOff, Loader2, Send, Zap, BookOpen, Sparkles } from 'lucide-react';
 import { useTextbookParser, TextbookChapter } from '../../hooks/useTextbookParser';
 import { useProfile } from '../../hooks/useProfile';
+import { useAuth } from '../../contexts/AuthContext';
 import { GoogleGenAI } from '@google/genai';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { useSessions } from '../../hooks/useSessions';
@@ -37,6 +38,7 @@ export default function TutorChat() {
     const { bookId, chapterIndex } = useParams<{ bookId: string; chapterIndex: string }>();
     const navigate = useNavigate();
     const { profile } = useProfile();
+    const { currentUser } = useAuth();
     const { textbooks, loadTextbooks, fetchChapterContent } = useTextbookParser();
     const { saveSession } = useSessions();
 
@@ -64,8 +66,8 @@ export default function TutorChat() {
 
     // Book data
     useEffect(() => {
-        if (textbooks.length === 0) loadTextbooks(profile?.uid);
-    }, [textbooks.length, loadTextbooks, profile?.uid]);
+        if (textbooks.length === 0) loadTextbooks(currentUser?.uid);
+    }, [textbooks.length, loadTextbooks, currentUser?.uid]);
 
     // Load chapter content
     useEffect(() => {
@@ -80,22 +82,19 @@ export default function TutorChat() {
 
         const load = async () => {
             try {
-                const text = await fetchChapterContent(ch.storagePath, book.id, ch.index, profile?.uid);
+                const text = await fetchChapterContent(ch.storagePath, book.id, ch.index, currentUser?.uid);
                 if (!text) throw new Error('Could not retrieve chapter text.');
                 setChapterContent(text);
 
                 // Use authoritative TOC subsections
                 setSubsections(ch.subsections || []);
 
-                // Silently load answers
+                // Silently load answers from Firebase Storage
                 if (ch.answersStoragePath) {
                     try {
-                        const ans = await fetchChapterContent(ch.answersStoragePath, book.id, ch.index, profile?.uid);
+                        const ans = await fetchChapterContent(ch.answersStoragePath, book.id, ch.index, currentUser?.uid);
                         if (ans) setAnswersContent(ans);
-                    } catch { /* non-fatal */ }
-                } else {
-                    const localAns = localStorage.getItem(`mama_answers_${book.id}_${ch.index}`);
-                    if (localAns) setAnswersContent(localAns);
+                    } catch { /* non-fatal — answers are optional */ }
                 }
             } catch (e: any) {
                 setError(e.message || 'Failed to load chapter content.');
@@ -103,7 +102,7 @@ export default function TutorChat() {
         };
 
         if (!chapterContent) load();
-    }, [textbooks, bookId, chapterIndex, profile?.uid, fetchChapterContent, chapterContent]);
+    }, [textbooks, bookId, chapterIndex, currentUser?.uid, fetchChapterContent, chapterContent]);
 
     // Scroll to bottom in chat mode
     useEffect(() => {
@@ -184,7 +183,7 @@ ${answersContent}
         try {
             const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
             const chatSession = ai.chats.create({
-                model: 'gemini-3-pro-preview',
+                model: 'gemini-3.1-pro-preview',
                 config: {
                     systemInstruction: buildSystemInstruction(focusTopic),
                     temperature: 0.3,

@@ -39,44 +39,43 @@ export function useTextbookParser() {
 
     /**
      * Load all books for the user from Firestore.
-     * Uses localStorage as fallback if not authenticated.
+     * Requires userId — throws if not authenticated.
      */
     const loadTextbooks = useCallback(async (userId?: string) => {
-        setIsLoadingBooks(true);
-        if (userId && db) {
-            try {
-                const col = collection(db, 'users', userId, 'textbooks');
-                const snapshot = await getDocs(col);
-                const books = snapshot.docs.map(d => d.data() as Textbook);
-                setTextbooks(books.sort((a, b) => b.uploadedAt - a.uploadedAt));
-            } catch (e) {
-                console.error('Error loading textbooks from Firestore:', e);
-                // Fall back to localStorage
-                const saved = localStorage.getItem('mama_textbooks');
-                if (saved) setTextbooks(JSON.parse(saved));
-            }
-        } else {
-            const saved = localStorage.getItem('mama_textbooks');
-            if (saved) setTextbooks(JSON.parse(saved));
+        if (!userId) {
+            console.warn('[useTextbookParser] loadTextbooks called without userId — skipping.');
+            return;
         }
-        setIsLoadingBooks(false);
+        setIsLoadingBooks(true);
+        try {
+            const col = collection(db, 'users', userId, 'textbooks');
+            const snapshot = await getDocs(col);
+            const books = snapshot.docs.map(d => d.data() as Textbook);
+            setTextbooks(books.sort((a, b) => b.uploadedAt - a.uploadedAt));
+        } catch (e) {
+            console.error('[useTextbookParser] Error loading textbooks from Firestore:', e);
+        } finally {
+            setIsLoadingBooks(false);
+        }
     }, []);
 
     /**
-     * Parse a PDF file into a structured Textbook with chapters.
-     * 1. Uses pdfjs-dist to extract text (already done by caller).
-     * 2. Sends to Gemini 3.1 Flash to detect chapters + metadata.
-     * 3. Saves each chapter .txt to Firebase Storage.
-     * 4. Saves metadata to Firestore.
+     * Parse a PDF / EPUB / ZIP file into a structured Textbook with chapters.
+     * Saves chapter text to Firebase Storage and metadata to Firestore.
+     * Throws if not authenticated.
      */
     const parseAndSave = useCallback(async (
         rawText: string,
         fileName: string,
         userId?: string,
         preParsedChapters?: any[],
-        bookTitleHint?: string,     // from zip prelims extraction
-        gradeLevelHint?: string     // e.g. "Class 12" from zip prelims
+        bookTitleHint?: string,
+        gradeLevelHint?: string
     ): Promise<Textbook | null> => {
+        if (!userId) {
+            console.error('[useTextbookParser] parseAndSave called without userId.');
+            return null;
+        }
         const apiKey = getApiKey();
         if (!apiKey) {
             alert('No Gemini API key found. Check your .env.local file.');
@@ -84,7 +83,7 @@ export function useTextbookParser() {
         }
 
         setIsParsing(true);
-        setParseProgress('Analyzing book metadata with Mama AI...');
+        setParseProgress('Analysing book metadata with Mama AI...');
 
         try {
             const ai = new GoogleGenAI({ apiKey });
@@ -92,8 +91,6 @@ export function useTextbookParser() {
             // Limit text to first 500k chars to fit in flash context
             const truncated = rawText.slice(0, 500000);
 
-            // If we already have the chapters natively (like from an EPUB), 
-            // we just need Gemini to categorize the BOOK (Subject, Grade Level, etc.).
             const hasChapters = preParsedChapters && preParsedChapters.length > 0;
 
             const promptText = hasChapters
@@ -140,12 +137,7 @@ ${truncated}`;
 
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
-                contents: [
-                    {
-                        role: 'user',
-                        parts: [{ text: promptText }]
-                    }
-                ],
+                contents: [{ role: 'user', parts: [{ text: promptText }] }],
                 config: {
                     responseMimeType: 'application/json',
                     responseSchema: {
@@ -178,51 +170,33 @@ ${truncated}`;
             try {
                 parsed = JSON.parse(response.text || '{}');
             } catch (parseErr) {
-                console.warn('[TextbookParser] Failed to parse Gemini JSON response, using fallbacks.', parseErr);
-                // For ZIP/EPUB where we already have chapters, this is non-fatal.
+                console.warn('[useTextbookParser] Failed to parse Gemini JSON response, using fallbacks.', parseErr);
             }
 
-            // If we had pre-parsed chapters, use those instead of Gemini's.
             const finalChaptersData = hasChapters ? preParsedChapters : parsed.chapters;
 
             if (!finalChaptersData || finalChaptersData.length === 0) {
-                throw new Error('No chapters detected. The file may not have clear chapter structure.');
+                throw new Error('No chapters detected. The file may not have a clear chapter structure.');
             }
 
             const bookId = `book_${Date.now()}`;
             const chapters: TextbookChapter[] = [];
 
-            // Upload each chapter's content to Firebase Storage (or localStorage fallback)
+            // Upload each chapter's content to Firebase Storage
             for (let i = 0; i < finalChaptersData.length; i++) {
                 const ch = finalChaptersData[i];
                 setParseProgress(`Saving chapter ${i + 1} of ${finalChaptersData.length}...`);
-                const storagePath = `users/${userId || 'anonymous'}/books/${bookId}/chapter-${ch.index}.txt`;
-                // Answers are stored at a hidden path, never listed in UI
+                const storagePath = `users/${userId}/books/${bookId}/chapter-${ch.index}.txt`;
                 const answersStoragePath = ch.answersContent
-                    ? `users/${userId || 'anonymous'}/books/${bookId}/answers-${ch.index}.txt`
+                    ? `users/${userId}/books/${bookId}/answers-${ch.index}.txt`
                     : undefined;
 
-                if (userId && storage) {
-                    try {
-                        const storageRef = ref(storage, storagePath);
-                        await uploadString(storageRef, ch.content);
+                const storageRef = ref(storage, storagePath);
+                await uploadString(storageRef, ch.content);
 
-                        // Silently save answers to hidden path
-                        if (answersStoragePath && ch.answersContent) {
-                            const answersRef = ref(storage, answersStoragePath);
-                            await uploadString(answersRef, ch.answersContent);
-                        }
-                    } catch (e) {
-                        localStorage.setItem(`mama_chapter_${bookId}_${ch.index}`, ch.content);
-                        if (ch.answersContent) {
-                            localStorage.setItem(`mama_answers_${bookId}_${ch.index}`, ch.answersContent);
-                        }
-                    }
-                } else {
-                    localStorage.setItem(`mama_chapter_${bookId}_${ch.index}`, ch.content);
-                    if (ch.answersContent) {
-                        localStorage.setItem(`mama_answers_${bookId}_${ch.index}`, ch.answersContent);
-                    }
+                if (answersStoragePath && ch.answersContent) {
+                    const answersRef = ref(storage, answersStoragePath);
+                    await uploadString(answersRef, ch.answersContent);
                 }
 
                 chapters.push({
@@ -239,11 +213,9 @@ ${truncated}`;
 
             const textbook: Textbook = {
                 id: bookId,
-                // Priority: bookTitleHint > Gemini detected > cleaned filename
                 title: bookTitleHint || parsed.title ||
                     fileName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
                 subject: parsed.subject || 'Other',
-                // Priority: gradeLevelHint > Gemini detected > Unknown
                 gradeLevel: gradeLevelHint || parsed.gradeLevel || 'Unknown',
                 language: parsed.language || 'English',
                 numChapters: chapters.length,
@@ -252,26 +224,13 @@ ${truncated}`;
             };
 
             setParseProgress('Saving to your library...');
-
-            // Save metadata to Firestore or localStorage
-            if (userId && db) {
-                try {
-                    await setDoc(doc(db, 'users', userId, 'textbooks', bookId), textbook);
-                } catch (e) {
-                    console.error('Firestore save error:', e);
-                    const existing = JSON.parse(localStorage.getItem('mama_textbooks') || '[]');
-                    localStorage.setItem('mama_textbooks', JSON.stringify([textbook, ...existing]));
-                }
-            } else {
-                const existing = JSON.parse(localStorage.getItem('mama_textbooks') || '[]');
-                localStorage.setItem('mama_textbooks', JSON.stringify([textbook, ...existing]));
-            }
+            await setDoc(doc(db, 'users', userId, 'textbooks', bookId), textbook);
 
             setTextbooks(prev => [textbook, ...prev]);
             return textbook;
 
         } catch (err: any) {
-            console.error('Failed to parse textbook:', err);
+            console.error('[useTextbookParser] Failed to parse textbook:', err);
             setParseProgress(`Error: ${err.message}`);
             return null;
         } finally {
@@ -281,41 +240,35 @@ ${truncated}`;
     }, []);
 
     /**
-     * Fetch a single chapter's content from Firebase Storage or localStorage.
+     * Fetch a single chapter's content from Firebase Storage.
      */
     const fetchChapterContent = useCallback(async (
         storagePath: string,
-        bookId: string,
-        chapterIndex: number,
+        _bookId: string,
+        _chapterIndex: number,
         userId?: string
     ): Promise<string> => {
-        if (userId && storage) {
-            try {
-                const storageRef = ref(storage, storagePath);
-                const url = await getDownloadURL(storageRef);
-                const res = await fetch(url);
-                return await res.text();
-            } catch (e) {
-                console.error('Storage fetch failed, falling back to localStorage:', e);
-            }
+        if (!userId) {
+            console.error('[useTextbookParser] fetchChapterContent called without userId.');
+            return '';
         }
-        return localStorage.getItem(`mama_chapter_${bookId}_${chapterIndex}`) || '';
+        const storageRef = ref(storage, storagePath);
+        const url = await getDownloadURL(storageRef);
+        const res = await fetch(url);
+        return res.text();
     }, []);
 
     /**
-     * Delete a textbook and all its chapter files.
+     * Delete a textbook and its Firestore metadata record.
+     * (Firebase Storage files are cleaned up via a Cloud Function or separately.)
      */
     const deleteTextbook = useCallback(async (bookId: string, userId?: string) => {
-        if (userId && db) {
-            try {
-                await deleteDoc(doc(db, 'users', userId, 'textbooks', bookId));
-            } catch (e) {
-                console.error('Firestore delete error:', e);
-            }
+        if (!userId) return;
+        try {
+            await deleteDoc(doc(db, 'users', userId, 'textbooks', bookId));
+        } catch (e) {
+            console.error('[useTextbookParser] Firestore delete error:', e);
         }
-        // Clean localStorage entries
-        const existing: Textbook[] = JSON.parse(localStorage.getItem('mama_textbooks') || '[]');
-        localStorage.setItem('mama_textbooks', JSON.stringify(existing.filter(b => b.id !== bookId)));
         setTextbooks(prev => prev.filter(b => b.id !== bookId));
     }, []);
 

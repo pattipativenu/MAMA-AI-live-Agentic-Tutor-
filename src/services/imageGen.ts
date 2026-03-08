@@ -5,38 +5,121 @@ const ai = new GoogleGenAI({
   apiKey: import.meta.env.VITE_GEMINI_API_KEY
 });
 
-/**
- * Enhanced prompt construction injecting the user's selected theme
- * and age/grade for pedagogical appropriateness.
- */
-function buildImagePrompt(concept: string, theme: string, age: string): string {
-  const themeStyles: Record<string, string> = {
-    'realistic': 'highly realistic, photographic, extremely detailed diagram style',
-    'space': 'futuristic sci-fi aesthetic, neon lights, deep space background, highly detailed',
-    'anime': 'Studio Ghibli inspired anime style, vibrant colors, expressive shading',
-    'historical': 'sepia-toned vintage sketchbook style, da Vinci notebook aesthetic, parchment background',
-    'action': 'dynamic comic book action style, bold outlines, dramatic lighting'
-  };
+// ── Audience calibration ──────────────────────────────────────────────────────
 
-  const styleModifier = themeStyles[theme] || themeStyles['realistic'];
-  const audienceContext = age ? `The diagram MUST be easy to understand for a student who is ${age}.` : '';
+function getAudienceNote(age: string): string {
+  const lower = age.toLowerCase();
+  const isYoung =
+    /class [5-7]|grade [5-7]|[1][0-2] year/.test(lower);
+  const isSenior =
+    /class 1[12]|grade 1[12]|1[78] year/.test(lower);
 
-  return `
-    Create an educational illustration demonstrating the scientific concept of: "${concept}".
-    
-    CRITICAL REQUIREMENTS:
-    - Artistic Style: ${styleModifier}
-    - ${audienceContext}
-    - The image must clearly isolate the main conceptual subjects.
-    - DO NOT include messy or illegible text natively in the generated image. Keep symbols clear.
-    - Aspect Ratio: Wide (16:9) landscape format.
-  `;
+  if (isYoung) {
+    return `Visual complexity calibrated for a ${age} student — use simple, bold shapes and fun analogies. Avoid complex formulas. Big forms, bright colours, and clear cause-and-effect relationships only.`;
+  }
+  if (isSenior) {
+    return `Visual complexity calibrated for a ${age} student — include precise annotations, relevant mathematical notation, vector diagrams, and the technical accuracy expected at advanced-study level.`;
+  }
+  return `Visual complexity calibrated for a ${age} student — balance visual clarity with moderate technical detail, labelled diagrams, and clear relational indicators.`;
 }
 
+// ── Per-theme art direction ───────────────────────────────────────────────────
+
+const THEME_DIRECTIONS: Record<
+  string,
+  { style: string; lighting: string; composition: string }
+> = {
+  realistic: {
+    style:
+      'A highly detailed scientific illustration rendered with the precision of a premium university press textbook — clean, professional, and pedagogically exact. Think a high-quality Nature or National Geographic educational spread.',
+    lighting:
+      'Soft, diffused studio lighting with gentle highlights that reveal depth and texture without harsh shadows. Subtle ambient occlusion adds dimensionality.',
+    composition:
+      'Composed as a clear educational diagram on a clean white or light-grey background. Elements are well-spaced, colour-coded, and accompanied by crisp annotation arrows that guide the eye.',
+  },
+  space: {
+    style:
+      'A breathtaking sci-fi visualisation in the style of award-winning NASA concept art — vibrant neon-cyan energy lines, luminous particle streams, and deep cosmic blues and purples that radiate discovery and wonder.',
+    lighting:
+      'Dramatic bioluminescent glow emanating from the central subject, with volumetric light shafts cutting through a deep starfield and high-contrast rim lighting defining every element against the dark cosmos.',
+    composition:
+      'Wide cinematic shot framing the concept against an infinite star-field. Bold geometric energy patterns and glowing orbital paths radiate outward from the focal point, creating a sense of vast scale.',
+  },
+  anime: {
+    style:
+      'A richly detailed Studio Ghibli-inspired illustration with lush cel-shading, expressive clean line work, and a warm, inviting colour palette of soft ambers, teals, and creamy whites.',
+    lighting:
+      'Warm golden-hour diffused sunlight with soft dappled shadows and a subtle lens flare — creating a gentle, approachable, and slightly magical atmosphere that makes learning feel like an adventure.',
+    composition:
+      'Medium shot with a beautifully hand-painted soft-bokeh background, placing the educational concept as the charming focal point. Delicate motion lines and sparkle effects add life.',
+  },
+  historical: {
+    style:
+      'A meticulous vintage scientific journal illustration rendered as if drawn by Leonardo da Vinci in his personal notebook — rich sepia ink-wash tones, careful cross-hatching, and the texture of aged parchment.',
+    lighting:
+      'Warm candlelight-style amber illumination casting long, gentle shadows — evoking a Renaissance scholar\'s workshop at dusk, scholarly and warm.',
+    composition:
+      'Precise technical drawing with elegant annotation arrows, handwritten-style labels, measurement guides, and a beautifully aged paper background with subtle foxing and torn edges.',
+  },
+  action: {
+    style:
+      'A high-energy comic book action spread with bold thick outlines, explosive Kirby-dot energy effects, and a vibrant primary colour palette that bursts with kinetic movement and excitement.',
+    lighting:
+      'Dramatic high-contrast spotlight lighting with a dominant key light and deep purple-black shadows, creating a bold theatrical and dynamic look inspired by DC/Marvel splash pages.',
+    composition:
+      'Dramatic low-angle shot with explosive perspective lines radiating from the focal point. Speed lines, impact stars, and selective motion blur convey raw power and rapid transformation.',
+  },
+};
+
+// ── Prompt builder (Nano Banana guide: narrative > keywords) ──────────────────
+
 /**
- * Attempts to generate an image using a specific model name.
+ * Builds a rich, descriptive educational image prompt following the
+ * Nano Banana prompting guide:
+ *  • Describe the scene narratively — never just list disconnected keywords
+ *  • Use photography/art-direction terminology (shot type, lens, lighting)
+ *  • Calibrate visual complexity to the student's age/grade
+ *  • Keep text minimal — let visual storytelling carry the concept
  */
-async function attemptGeneration(modelName: string, prompt: string, resolution: string, aspectRatio: string): Promise<string> {
+function buildImagePrompt(concept: string, theme: string, age: string): string {
+  const { style, lighting, composition } =
+    THEME_DIRECTIONS[theme] ?? THEME_DIRECTIONS.realistic;
+
+  const complexityNote = age
+    ? getAudienceNote(age)
+    : 'Use clear, universally accessible visual complexity suitable for high-school students.';
+
+  return `
+Create a stunning educational visual that makes the concept "${concept}" immediately clear, memorable, and beautiful.
+
+ARTISTIC DIRECTION:
+${style}
+
+LIGHTING & ATMOSPHERE:
+${lighting}
+
+COMPOSITION & FRAMING:
+${composition}
+
+EDUCATIONAL REQUIREMENTS:
+• The concept "${concept}" must be the unmistakable focal point — every visual element should serve its understanding, nothing else.
+• ${complexityNote}
+• Use concrete visual metaphors and real-world scale references to make abstract ideas instantly tangible.
+• Keep any text or symbols minimal and crystal-clear — prioritise visual storytelling and colour-coded relationships over labels.
+• Include purposeful indicators (arrows, flow lines, highlights, or motion trails) to show direction, force, energy transfer, or cause and effect where relevant.
+• Wide landscape 16:9 format.
+
+QUALITY BAR: This image should be so vivid and self-explanatory that a student immediately grasps the core concept from the image alone, before reading a single word of accompanying text.
+  `.trim();
+}
+
+// ── Core generation logic ─────────────────────────────────────────────────────
+
+/**
+ * Attempts to generate an image using the specified model.
+ * Returns a base64 data URI for direct browser rendering.
+ */
+async function attemptGeneration(modelName: string, prompt: string): Promise<string> {
   console.log(`[ImageGen] Trying model: ${modelName}`);
 
   const response = await ai.models.generateContent({
@@ -44,12 +127,9 @@ async function attemptGeneration(modelName: string, prompt: string, resolution: 
     contents: prompt,
     config: {
       responseModalities: ['TEXT', 'IMAGE'],
-      // Note: The public Node SDK for GoogleGenAI passes these under generic config objects if supported by the model
-      // We also send the prompt explicitly to define aspect ratios
-    }
+    },
   });
 
-  // Extract the base64 or URI depending on how the SDK parses the image response
   const imagePart = response.candidates?.[0]?.content?.parts?.find(
     (p: any) => p.inlineData || p.fileData
   );
@@ -57,44 +137,47 @@ async function attemptGeneration(modelName: string, prompt: string, resolution: 
   if (imagePart?.inlineData?.data) {
     const mimeType = imagePart.inlineData.mimeType || 'image/png';
     return `data:${mimeType};base64,${imagePart.inlineData.data}`;
-  } else if (imagePart?.fileData?.fileUri) {
-    throw new Error(`Model returned a fileURI (${imagePart.fileData.fileUri}) rather than inline base64 data. We need base64 for direct browser rendering.`);
   }
 
-  throw new Error(`Model ${modelName} returned successfully but contained no valid image data in parts array.`);
+  if (imagePart?.fileData?.fileUri) {
+    throw new Error(
+      `Model returned a fileURI (${imagePart.fileData.fileUri}) rather than inline base64 data. We need base64 for direct browser rendering.`
+    );
+  }
+
+  throw new Error(
+    `Model ${modelName} returned successfully but contained no valid image data in the parts array.`
+  );
 }
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export interface ImageGenerationOptions {
   theme?: string;
   age?: string;
-  resolution?: '512px' | '1K' | '2K' | '4K';
-  aspectRatio?: string;
 }
 
 /**
- * Generates an educational image.
- * Primary: Nano Banana Pro (gemini-3-pro-image-preview)
- * Fallback: Nano Banana 2 (gemini-3.1-flash-image-preview)
+ * Generates a rich educational image using Nano Banana-optimised prompting.
+ *
+ * Primary:  Nano Banana Pro  (gemini-3-pro-image-preview)
+ * Fallback: Nano Banana 2    (gemini-3.1-flash-image-preview)
  */
-export async function generateEducationalImage(concept: string, options: ImageGenerationOptions = {}): Promise<string> {
-  const {
-    theme = 'realistic',
-    age = '',
-    resolution = '2K',
-    aspectRatio = '16:9'
-  } = options;
+export async function generateEducationalImage(
+  concept: string,
+  options: ImageGenerationOptions = {}
+): Promise<string> {
+  const { theme = 'realistic', age = '' } = options;
   const fullPrompt = buildImagePrompt(concept, theme, age);
 
   try {
-    // Try Nano Banana Pro first
-    return await attemptGeneration('gemini-3-pro-image-preview', fullPrompt, resolution, aspectRatio);
+    return await attemptGeneration('gemini-3-pro-image-preview', fullPrompt);
   } catch (proError) {
-    console.warn(`[ImageGen] Nano Banana Pro failed. Falling back to Nano Banana 2...`, proError);
+    console.warn('[ImageGen] Nano Banana Pro failed. Falling back to Nano Banana 2…', proError);
     try {
-      // Fallback to Nano Banana 2
-      return await attemptGeneration('gemini-3.1-flash-image-preview', fullPrompt, resolution, aspectRatio);
+      return await attemptGeneration('gemini-3.1-flash-image-preview', fullPrompt);
     } catch (error) {
-      console.error(`[ImageGen] Both models failed. FINAL ERROR:`, error);
+      console.error('[ImageGen] Both models failed. FINAL ERROR:', error);
       throw new Error('Image generation pipeline failed. Please check your API usage limits.');
     }
   }
