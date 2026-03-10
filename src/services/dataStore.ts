@@ -2,6 +2,8 @@
  * dataStore.ts — Centralized Firestore data service.
  * All reads/writes for profiles, sessions, and session generation jobs go through here.
  * No localStorage is used anywhere in this file.
+ * 
+ * Also re-exports media cache functions for convenience.
  */
 import {
   doc,
@@ -53,6 +55,7 @@ export function subscribeToSessions(
       const sessions = snapshot.docs.map(
         (d) => ({ ...d.data(), id: d.id } as SavedSession)
       );
+      console.log('[DataStore] Sessions updated:', sessions.length, 'sessions');
       callback(sessions);
     },
     (error) => {
@@ -65,8 +68,15 @@ export function subscribeToSessions(
  * Write (or overwrite) a session document.
  */
 export async function saveSessionToDb(uid: string, session: SavedSession): Promise<void> {
-  const ref = doc(db, 'users', uid, 'sessions', session.id);
-  await setDoc(ref, session);
+  try {
+    console.log('[DataStore] Saving session to Firestore:', session.id, 'with', session.messages.length, 'messages');
+    const ref = doc(db, 'users', uid, 'sessions', session.id);
+    await setDoc(ref, session);
+    console.log('[DataStore] Session saved successfully:', session.id);
+  } catch (error) {
+    console.error('[DataStore] Failed to save session:', error);
+    throw error;
+  }
 }
 
 /**

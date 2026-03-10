@@ -13,26 +13,42 @@ import CarouselViewer from '../../components/Carousel/CarouselViewer';
 import { CarouselSlide } from '../../hooks/useCarousel';
 import { subscribeToVideoJobs, startGenerationQueue } from '../../services/generationQueue';
 import { subscribeToSession } from '../../services/dataStore';
+import { useTextbookParser } from '../../hooks/useTextbookParser';
+import TextbookSelector from '../../components/TextbookSelector';
+import { playModeEntrySound } from '../../utils/sound';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // System Instruction (complete — all 6 rules)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const getExamSystemInstruction = (profile: UserProfile): string => {
+interface ExamContext {
+  bookId?: string;
+  chapterIndex?: number;
+  chapterTitle?: string;
+  chapterContent?: string;
+}
+
+export const getExamSystemInstruction = (profile: UserProfile | null, context?: ExamContext): string => {
   let profileContext = '';
-  if (profile.age || profile.gender || profile.hobbies.length > 0 || profile.learningStyle) {
+  if (profile && (profile.age || profile.gender || profile.hobbies?.length > 0 || profile.learningStyle)) {
     profileContext = `\n\n--- STUDENT PROFILE ---\n`;
     if (profile.age) profileContext += `Age/Grade: ${profile.age}\n`;
     if (profile.gender) profileContext += `Gender: ${profile.gender}\n`;
-    if (profile.hobbies.length > 0) profileContext += `Favourite Activities/Hobbies: ${profile.hobbies.join(', ')}\n`;
+    if (profile.hobbies?.length > 0) profileContext += `Favourite Activities/Hobbies: ${profile.hobbies.join(', ')}\n`;
     if (profile.learningStyle) profileContext += `Preferred Learning Style: ${profile.learningStyle}\n`;
     profileContext += `DO NOT ask the student for this information again — you already know it. Tailor all your questions, examples, and image generation prompts specifically to their age, gender, and favourite activities.\n`;
+  }
+
+  // Add textbook context if available
+  let textbookContext = "";
+  if (context?.chapterContent) {
+    textbookContext = `\n\n--- TEXTBOOK CONTEXT ---\nChapter: ${context.chapterTitle || 'Selected Chapter'}\n\n${context.chapterContent.substring(0, 8000)}\n\nUse this textbook content to generate relevant practice questions. Focus on the key concepts, formulas, and problem types covered in this chapter. Ask questions similar to what would appear in an exam on this material.\n`;
   }
 
   return `
 You are Mama AI, a warm, encouraging, and patient voice-first AI examiner for students in Classes 5 through 12.
 The student is entering "Exam Mode". You test them on Science (Physics, Chemistry, Biology) and Math.
-${profileContext}
+${profileContext}${textbookContext}
 CRITICAL EXAM RULES:
 1. AGE & PERSONALIZATION FIRST: Only ask the student for their age/grade and favourite hobby if it is NOT already provided in the profile above. Use this context to personalise all questions, examples, and corrections throughout the session.
 
@@ -74,9 +90,14 @@ export default function ExamEntry() {
   const { sessions, saveSession } = useSessions();
   const { evaluateTranscript, isEvaluating } = useGeminiReasoning();
   const { step, nextStep, jumpToStep } = useExamMachine();
+  const { fetchChapterContent } = useTextbookParser();
 
   // Stable session ID — generated once at mount
   const sessionIdRef = useRef(Date.now().toString());
+
+  // Textbook selection state - DISABLED for direct entry like TutorChat
+  const [showTextbookSelector, setShowTextbookSelector] = useState(false);
+  const [examContext, setExamContext] = useState<ExamContext>({});
 
   // Concept hooks produced by evaluation
   const [conceptHooks, setConceptHooks] = useState<ConceptHook[]>([]);
@@ -91,14 +112,14 @@ export default function ExamEntry() {
     isConnected, isConnecting, isSilent, isMuted,
     messages, currentImage, isGeneratingImage,
     connect, disconnect, toggleMute, sendClientMessage,
-  } = useGeminiLive((msgs) => {
+  } = useGeminiLive('exam', (msgs) => {
     saveSession('exam', msgs, sessionIdRef.current);
   });
 
   // Cleanup on unmount
   useEffect(() => {
     return () => { disconnect(); };
-  }, [disconnect]);
+  }, []);
 
   // ── Auto-wire: hooks_generation → evaluateTranscript ────────────────────
   useEffect(() => {
@@ -184,13 +205,40 @@ export default function ExamEntry() {
   };
 
   const handleConnect = () => {
-    const instruction = getExamSystemInstruction(profile);
+    const instruction = getExamSystemInstruction(profile, examContext);
     let previousMessages;
     if (resumeId) {
       const session = sessions.find((s) => s.id === resumeId);
       if (session) previousMessages = session.messages;
     }
     connect(instruction, previousMessages, selectedImage);
+  };
+
+  // Handle textbook selection
+  const handleTextbookSelect = async (bookId: string, chapterIndex: number, chapterTitle: string) => {
+    try {
+      const content = await fetchChapterContent(
+        `textbooks/${bookId}/chapter_${chapterIndex}.txt`,
+        bookId,
+        chapterIndex,
+        undefined
+      );
+      setExamContext({
+        bookId,
+        chapterIndex,
+        chapterTitle,
+        chapterContent: content || undefined
+      });
+    } catch (e) {
+      console.warn('[ExamEntry] Failed to load chapter content:', e);
+      setExamContext({ bookId, chapterIndex, chapterTitle });
+    }
+    setShowTextbookSelector(false);
+  };
+
+  // Skip textbook selection
+  const handleSkipTextbook = () => {
+    setShowTextbookSelector(false);
   };
 
   const handleNextStep = () => {
@@ -209,8 +257,29 @@ export default function ExamEntry() {
 
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Show textbook selector first
+  if (showTextbookSelector) {
+    return (
+      <div className="h-dvh flex flex-col overflow-hidden">
+        <TextbookSelector
+          mode="exam"
+          onSelect={handleTextbookSelect}
+          onSkip={handleSkipTextbook}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-dvh bg-[rgb(250,249,245)] text-zinc-900 overflow-hidden relative">
+      {/* Chapter context indicator */}
+      {examContext.chapterTitle && (
+        <div className="absolute top-0 left-0 right-0 bg-amber-50 border-b border-amber-200 px-4 py-2 z-40">
+          <p className="text-xs font-bold text-amber-700 text-center">
+            📝 Exam based on: {examContext.chapterTitle}
+          </p>
+        </div>
+      )}
 
       {/* ── Step Header ─────────────────────────────────────────────────── */}
       <div className="absolute top-0 inset-x-0 z-30 p-4 flex items-center justify-between bg-white/80 backdrop-blur-md border-b border-zinc-200">

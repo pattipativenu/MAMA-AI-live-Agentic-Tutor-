@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, getDoc, collection } from 'firebase/firestore';
 import { generateEducationalImage } from './imageGen';
 import { startVideoGenerationJob } from './videoGen';
 import { CarouselSlide } from '../hooks/useCarousel';
@@ -88,7 +88,7 @@ export async function startGenerationQueue(
           userId,
           sessionId,
           videoSlideId,
-          { age, theme, aspectRatio: '9:16', resolution: '720p' }
+          { age, theme: theme as any, aspectRatio: '9:16', resolution: '720p' }
         ).catch(err => {
           console.warn(`[GenQueue] Background video job failed for ${hook.term}`, err);
         });
@@ -133,12 +133,10 @@ export function subscribeToVideoJobs(
   sessionId: string,
   onUpdate: (slideId: string, videoUrl: string) => void
 ) {
-  const { collection, onSnapshot: firestoreOnSnapshot } = require('firebase/firestore');
-
   const jobsRef = collection(db, 'users', userId, 'sessions', sessionId, 'videoJobs');
 
-  return firestoreOnSnapshot(jobsRef, (snapshot: any) => {
-    snapshot.docChanges().forEach((change: any) => {
+  return onSnapshot(jobsRef, (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
       // Listen for newly added or modified jobs that are complete
       if (change.type === 'modified' || change.type === 'added') {
         const data = change.doc.data();

@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { extractTextFromPdf } from './pdfExtractor';
+import { extractDiagramsFromChapter } from './diagramExtractor';
 
 export interface TocSubsection {
     num: string;     // e.g. "1.1", "9.7"
@@ -22,6 +23,7 @@ export interface ZipExtractionResult {
     chapters: PreParsedChapter[];
     bookTitleHint: string;  // e.g. "Physics Part II"
     gradeLevelHint: string; // e.g. "Class 12"
+    diagramCount?: number;  // Number of diagrams extracted
 }
 
 // ─── Word-to-number map for NCERT chapter ordinals ─────────────────────────
@@ -248,8 +250,17 @@ function extractChapterTitleFromContent(text: string, fallbackIndex: number): st
  * - Prelims → book title, grade, TOC chapter names
  * - Answers → stored silently for Gemini context injection (never shown to user)
  * - Chapters → content PDFs with real titles from TOC
+ * - Diagrams → extracted and analyzed for multimodal tutoring (optional)
  */
-export async function extractChaptersFromZip(file: File): Promise<ZipExtractionResult> {
+export async function extractChaptersFromZip(
+  file: File,
+  options: {
+    userId?: string;
+    bookId?: string;
+    extractDiagrams?: boolean;
+    onDiagramProgress?: (pageNum: number, totalPages: number, status: string) => void;
+  } = {}
+): Promise<ZipExtractionResult> {
     const zip = new JSZip();
     const contents = await zip.loadAsync(file);
 
@@ -264,8 +275,10 @@ export async function extractChaptersFromZip(file: File): Promise<ZipExtractionR
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
     if (allPdfFiles.length === 0) {
-        throw new Error('No PDF files found in the ZIP archive.');
+        throw new Error('No PDF files found in the ZIP archive. Ensure the ZIP contains PDF files, not folders or other formats.');
     }
+    
+    console.log(`[ZipExtractor] Found ${allPdfFiles.length} PDF files:`, allPdfFiles);
 
     // Classify each PDF
     const chapterFiles: string[] = [];
@@ -274,12 +287,32 @@ export async function extractChaptersFromZip(file: File): Promise<ZipExtractionR
 
     for (const name of allPdfFiles) {
         const role = classifyPdf(name);
+        console.log(`[ZipExtractor] Classified ${name} as: ${role}`);
         if (role === 'chapter') chapterFiles.push(name);
         else if (role === 'answers') answerFiles.push(name);
         else if (role === 'prelims') prelimFiles.push(name);
     }
 
-    console.log(`[ZipExtractor] ${chapterFiles.length} chapters, ${answerFiles.length} answers, ${prelimFiles.length} prelims`);
+    console.log(`[ZipExtractor] Classification: ${chapterFiles.length} chapters, ${answerFiles.length} answers, ${prelimFiles.length} prelims`);
+    
+    // Fallback: If no chapters detected but we have unclassified PDFs, treat them as chapters
+    const unknownFiles = allPdfFiles.filter(name => {
+        const role = classifyPdf(name);
+        return role === 'unknown';
+    });
+    
+    if (chapterFiles.length === 0 && unknownFiles.length > 0) {
+        console.warn(`[ZipExtractor] No chapters detected, but found ${unknownFiles.length} unclassified PDFs.`);
+        console.warn(`[ZipExtractor] Treating unclassified files as chapters as fallback.`);
+        console.warn(`[ZipExtractor] Unclassified files:`, unknownFiles);
+        chapterFiles.push(...unknownFiles);
+    }
+    
+    if (chapterFiles.length === 0) {
+        console.error(`[ZipExtractor] ERROR: No chapter files detected!`);
+        console.error(`[ZipExtractor] All files:`, allPdfFiles);
+        console.error(`[ZipExtractor] Classification rules: files ending in 2-3 digits = chapter, ending in 'an' = answers, others = prelims`);
+    }
 
     // ── Extract Prelims (book info + TOC) ───────────────────────────────────
     let preliimText = '';
@@ -302,6 +335,12 @@ export async function extractChaptersFromZip(file: File): Promise<ZipExtractionR
             tocSubsectionsMap = extractTocSubsections(fixedText);
 
             console.log(`[ZipExtractor] Book: "${bookTitleHint}", Grade: "${gradeLevelHint}", TOC chapters: ${tocChapters.length}, Subsection groups: ${tocSubsectionsMap.size}`);
+            
+            // Log subsections for each chapter
+            tocSubsectionsMap.forEach((subsections, chapterNum) => {
+                console.log(`[ZipExtractor] Chapter ${chapterNum} subsections (${subsections.length}):`, 
+                    subsections.map(s => s.num).join(', '));
+            });
             break;
         } catch (e) {
             console.warn('[ZipExtractor] Failed to read prelims:', e);
@@ -334,6 +373,8 @@ export async function extractChaptersFromZip(file: File): Promise<ZipExtractionR
     const relevantTocChapters = tocChapters.slice(-chapterFiles.length);
     console.log(`[ZipExtractor] Using ${relevantTocChapters.length} relevant TOC chapters:`,
         relevantTocChapters.map(c => `Ch${c.num}: ${c.title}`));
+
+    let totalDiagramsExtracted = 0;
 
     for (let i = 0; i < chapterFiles.length; i++) {
         const name = chapterFiles[i];
@@ -383,6 +424,29 @@ export async function extractChaptersFromZip(file: File): Promise<ZipExtractionR
                 subsectionRange,
                 answersContent: answersText || undefined,
             });
+
+            // ── Extract Diagrams (optional) ─────────────────────────────────────
+            if (options.extractDiagrams && options.userId && options.bookId) {
+                console.log(`[ZipExtractor] Extracting diagrams from ${name}...`);
+                try {
+                    const diagrams = await extractDiagramsFromChapter(
+                        pdfFile,
+                        options.bookId,
+                        chapterNumber,
+                        options.userId,
+                        {
+                            scale: 2.0,
+                            onProgress: options.onDiagramProgress
+                        }
+                    );
+                    totalDiagramsExtracted += diagrams.length;
+                    console.log(`[ZipExtractor] Extracted ${diagrams.length} diagrams from ${name}`);
+                } catch (diagramError) {
+                    console.warn(`[ZipExtractor] Diagram extraction failed for ${name}:`, diagramError);
+                    // Continue without diagrams - text extraction still succeeded
+                }
+            }
+
         } catch (err) {
             console.error(`[ZipExtractor] Failed to read ${name}:`, err);
             failed.push(name);
@@ -390,6 +454,25 @@ export async function extractChaptersFromZip(file: File): Promise<ZipExtractionR
     }
 
     if (chapters.length === 0) {
+        // If we have chapter files but all failed, report the specific errors
+        if (chapterFiles.length > 0 && failed.length > 0) {
+            throw new Error(
+                `Failed to extract ${failed.length} of ${chapterFiles.length} chapter PDFs. ` +
+                `Failed files: ${failed.join(', ')}. ` +
+                `Ensure PDFs contain selectable text (not scanned images, not corrupted).`
+            );
+        }
+        
+        // If no chapter files were detected at all
+        if (chapterFiles.length === 0) {
+            throw new Error(
+                `No chapter files detected in the ZIP. Found ${allPdfFiles.length} PDF(s) but none matched chapter patterns. ` +
+                `Expected chapter files to end with 2-3 digits (e.g., 'chapter09.pdf'). ` +
+                `Files found: ${allPdfFiles.slice(0, 5).join(', ')}${allPdfFiles.length > 5 ? '...' : ''}`
+            );
+        }
+        
+        // Generic fallback
         throw new Error(
             `Could not extract any chapter PDFs from the ZIP. Failed: ${failed.join(', ')}. ` +
             `Ensure PDFs contain selectable text (not scanned images).`
@@ -405,5 +488,6 @@ export async function extractChaptersFromZip(file: File): Promise<ZipExtractionR
         chapters,
         bookTitleHint,
         gradeLevelHint,
+        diagramCount: totalDiagramsExtracted,
     };
 }

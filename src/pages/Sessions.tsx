@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock, Play, ChevronRight, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Clock, Play, ChevronRight, Image as ImageIcon, Video } from 'lucide-react';
 import { useSessions, SavedSession } from '../hooks/useSessions';
 
 export default function Sessions() {
   const navigate = useNavigate();
   const { sessions } = useSessions();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  
+  console.log('[Sessions] Rendering with', sessions.length, 'sessions');
 
   const handleResume = (session: SavedSession) => {
     // Navigate to the appropriate mode with the session ID to resume
@@ -43,7 +45,11 @@ export default function Sessions() {
                 <div>
                   <div className="flex items-center gap-3 mb-2">
                     <span className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded-md ${
-                      session.mode === 'lab' ? 'bg-teal-50 text-teal-600' : 'bg-amber-50 text-amber-600'
+                      session.mode === 'lab' 
+                        ? 'bg-teal-50 text-teal-600' 
+                        : session.mode === 'tutor'
+                        ? 'bg-indigo-50 text-indigo-600'
+                        : 'bg-amber-50 text-amber-600'
                     }`}>
                       {session.mode} Mode
                     </span>
@@ -83,6 +89,20 @@ export default function Sessions() {
                               <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-md px-2 py-1 rounded-full flex items-center gap-1 border border-zinc-200/50 shadow-sm">
                                 <ImageIcon size={12} className="text-amber-500" />
                                 <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-wider">Visual Aid</span>
+                              </div>
+                            </div>
+                          )}
+                          {msg.video && (
+                            <div className="mt-4 relative rounded-xl overflow-hidden border border-zinc-200 shadow-sm">
+                              <video 
+                                src={msg.video} 
+                                controls 
+                                className="w-full h-auto max-h-64"
+                                poster="/video-thumbnail.jpg"
+                              />
+                              <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-md px-2 py-1 rounded-full flex items-center gap-1 border border-zinc-200/50 shadow-sm">
+                                <Video size={12} className="text-indigo-500" />
+                                <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-wider">Video</span>
                               </div>
                             </div>
                           )}

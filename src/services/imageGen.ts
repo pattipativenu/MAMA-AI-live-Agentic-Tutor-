@@ -160,8 +160,8 @@ export interface ImageGenerationOptions {
 /**
  * Generates a rich educational image using Nano Banana-optimised prompting.
  *
- * Primary:  Nano Banana Pro  (gemini-3-pro-image-preview)
- * Fallback: Nano Banana 2    (gemini-3.1-flash-image-preview)
+ * Primary:  Nano Banana 2    (gemini-3.1-flash-image-preview)
+ * Fallback: Nano Banana Pro  (gemini-3-pro-image-preview)
  */
 export async function generateEducationalImage(
   concept: string,
@@ -171,11 +171,11 @@ export async function generateEducationalImage(
   const fullPrompt = buildImagePrompt(concept, theme, age);
 
   try {
-    return await attemptGeneration('gemini-3-pro-image-preview', fullPrompt);
-  } catch (proError) {
-    console.warn('[ImageGen] Nano Banana Pro failed. Falling back to Nano Banana 2…', proError);
+    return await attemptGeneration('gemini-3.1-flash-image-preview', fullPrompt);
+  } catch (flashError) {
+    console.warn('[ImageGen] Nano Banana 2 failed. Falling back to Nano Banana Pro…', flashError);
     try {
-      return await attemptGeneration('gemini-3.1-flash-image-preview', fullPrompt);
+      return await attemptGeneration('gemini-3-pro-image-preview', fullPrompt);
     } catch (error) {
       console.error('[ImageGen] Both models failed. FINAL ERROR:', error);
       throw new Error('Image generation pipeline failed. Please check your API usage limits.');

@@ -1,5 +1,5 @@
 <div align="center">
-<img width="1200" height="auto" alt="Mama AI Banner" src="./public/assets/mama_ai_banner_final.png" />
+<img width="1200" height="auto" alt="Mama AI Banner" src="./public/assets/Mama_ai_banner.png" />
 
 # Mama AI: The Multimodal "Private Tutor"
 **Built for the Google Gemini Live Agent Challenge**

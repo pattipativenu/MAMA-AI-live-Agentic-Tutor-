@@ -1,8 +1,20 @@
 import { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, BookOpen, ChevronRight, Hash } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChevronRight, Hash, FlaskConical, Atom, Calculator, BookText, Dna, Brain, Laptop } from 'lucide-react';
 import { useTextbookParser } from '../../hooks/useTextbookParser';
 import { useAuth } from '../../contexts/AuthContext';
+
+// Subject-specific icons and labels
+const SUBJECT_CONFIG: Record<string, { icon: any; label: string; color: string }> = {
+    'Chemistry': { icon: FlaskConical, label: 'Unit', color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
+    'Physics': { icon: Atom, label: 'Chapter', color: 'text-blue-600 bg-blue-50 border-blue-200' },
+    'Math': { icon: Calculator, label: 'Chapter', color: 'text-indigo-600 bg-indigo-50 border-indigo-200' },
+    'Biology': { icon: Dna, label: 'Chapter', color: 'text-rose-600 bg-rose-50 border-rose-200' },
+    'Biotechnology': { icon: Brain, label: 'Unit', color: 'text-teal-600 bg-teal-50 border-teal-200' },
+    'Computer Science': { icon: Laptop, label: 'Chapter', color: 'text-purple-600 bg-purple-50 border-purple-200' },
+    'Accountancy': { icon: BookText, label: 'Chapter', color: 'text-amber-600 bg-amber-50 border-amber-200' },
+    'default': { icon: BookOpen, label: 'Chapter', color: 'text-zinc-600 bg-zinc-50 border-zinc-200' },
+};
 
 export default function StudyDetail() {
     const { bookId } = useParams<{ bookId: string }>();
@@ -20,6 +32,11 @@ export default function StudyDetail() {
     const book = useMemo(() =>
         textbooks.find(b => b.id === bookId),
         [textbooks, bookId]);
+
+    // Get subject configuration
+    const subjectConfig = book ? (SUBJECT_CONFIG[book.subject] || SUBJECT_CONFIG['default']) : SUBJECT_CONFIG['default'];
+    const SectionIcon = subjectConfig.icon;
+    const sectionLabel = subjectConfig.label; // 'Chapter' or 'Unit'
 
     if (!book && textbooks.length > 0) {
         return (
@@ -61,7 +78,7 @@ export default function StudyDetail() {
                             })()}
 
                             <span className="text-sm font-medium text-zinc-500 flex items-center gap-1.5">
-                                <BookOpen size={14} /> {book.language} &bull; {book.gradeLevel} &bull; {book.numChapters} Chapters
+                                <SectionIcon size={14} /> {book.language} &bull; {book.gradeLevel} &bull; {book.numChapters} {sectionLabel}s
                             </span>
                         </div>
                     </>
@@ -70,9 +87,9 @@ export default function StudyDetail() {
                 )}
             </div>
 
-            {/* Chapters List */}
+            {/* Chapters/Units List */}
             <div className="p-4 sm:p-6 pb-24">
-                <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-400 mb-4 ml-2">Chapters</h2>
+                <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-400 mb-4 ml-2">{sectionLabel}s</h2>
 
                 <div className="flex flex-col gap-3">
                     {book?.chapters.map((chapter) => (
@@ -90,13 +107,13 @@ export default function StudyDetail() {
                             </div>
 
                             <div className="flex-1 min-w-0 pr-4">
-                                {/* Bold 'Chapter N' heading */}
+                                {/* Bold section label heading */}
                                 <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600 mb-0.5">
-                                    Chapter {chapter.index}
+                                    {sectionLabel} {chapter.index}
                                 </p>
-                                {/* Chapter name — strip 'Chapter N:' prefix if present */}
+                                {/* Section name — strip 'Chapter N:' or 'Unit N:' prefix if present */}
                                 <h3 className="font-bold text-zinc-900 group-hover:text-amber-800 transition-colors line-clamp-2 leading-snug text-sm">
-                                    {chapter.title.replace(/^Chapter\s+\d+[:\-]?\s*/i, '')}
+                                    {chapter.title.replace(/^(Chapter|Unit)\s+\d+[:\-]?\s*/i, '')}
                                 </h3>
                                 {/* Subsection range */}
                                 {chapter.subsectionRange && (

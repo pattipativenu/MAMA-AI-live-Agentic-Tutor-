@@ -2,16 +2,64 @@ import { useState, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { float32ToPcm16Base64, pcm16Base64ToFloat32 } from '../utils/audio';
 import { SessionMessage } from './useSessions';
+import { GeminiVoice, VOICE_NAME_MAP } from '../types/profile';
+import { WhiteboardState, WhiteboardStep, DEFAULT_WHITEBOARD_STATE } from '../types/whiteboard';
+import { parseWhiteboardChunk, cleanWhiteboardMarkers, stepToChatMessage } from '../utils/whiteboardParser';
+import { startVideoGenerationJob, subscribeToVideoJobs, VideoJob } from '../services/videoGen';
+import { getAuth } from 'firebase/auth';
 
-export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => void) {
+export interface GeneratedMedia {
+  type: 'image' | 'video';
+  url: string;
+  prompt?: string;
+  timestamp: number;
+  caption?: string;
+}
+
+export type VoiceStatus = 
+  | 'listening'       // User speaking
+  | 'thinking'        // AI processing
+  | 'explaining'      // AI speaking general
+  | 'clarifying'      // AI answering a doubt
+  | 'creating-visual' // AI generating image
+  | 'creating-video'  // AI generating video
+  | 'asking'          // AI asking a question
+  | 'referencing'     // AI referencing textbook page
+  | 'waiting'         // AI waiting for user response
+  | 'whiteboard'      // AI writing on whiteboard
+  | 'muted';          // Mic muted
+
+export interface StatusInfo {
+  text: string;
+  color: 'amber' | 'green' | 'purple' | 'blue' | 'zinc' | 'orange';
+  icon: 'mic' | 'thinking' | 'speaking' | 'image' | 'video' | 'question' | 'book' | 'muted' | 'pencil';
+}
+
+export type LiveMode = 'lab' | 'exam' | 'tutor';
+
+export function useGeminiLive(
+  mode: LiveMode,
+  onSessionEnd?: (messages: SessionMessage[]) => void,
+  voiceName: GeminiVoice = 'Victoria'
+) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [status, setStatus] = useState('Disconnected');
+  const [status, setStatus] = useState<VoiceStatus>('listening');
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [isSilent, setIsSilent] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [generatedMedia, setGeneratedMedia] = useState<GeneratedMedia[]>([]);
+  const [currentMediaIndex, setCurrentMediaIndex] = useState<number>(0);
+  
+  // Video job subscriptions cleanup
+  const videoJobUnsubscribersRef = useRef<(() => void)[]>([]);
+  
+  // Whiteboard state for formula explanations
+  const [whiteboardState, setWhiteboardState] = useState<WhiteboardState>(DEFAULT_WHITEBOARD_STATE);
+  const whiteboardBufferRef = useRef('');  // Buffer for incomplete whiteboard markers
 
   // Ref so onaudioprocess callback always reads the LATEST muted state (avoids stale closure bug)
   const isMutedRef = useRef(false);
@@ -31,10 +79,92 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
 
   // Use a ref to access the latest messages inside callbacks without stale closures
   const messagesRef = useRef<SessionMessage[]>([]);
-  messagesRef.current = messages;
+  
+  // Track current AI transcript for smart status detection
+  const currentAiTextRef = useRef('');
+  const statusTimeoutRef = useRef<number | null>(null);
+  
+  // Track last AI message addition to prevent duplicates between text parts and audio transcription
+  const lastAiMessageRef = useRef<{ text: string; timestamp: number } | null>(null);
+
+  // Update ref immediately whenever messages change
+  const updateMessages = useCallback((newMessages: SessionMessage[] | ((prev: SessionMessage[]) => SessionMessage[])) => {
+    setMessages(prev => {
+      const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
+      messagesRef.current = updated;
+      return updated;
+    });
+  }, []);
+
+  // Smart status detection based on AI text content
+  const detectSmartStatus = useCallback((text: string): VoiceStatus => {
+    const lowerText = text.toLowerCase();
+    
+    // Check for question patterns
+    if (/\?\s*$/.test(text) || /^(can you|do you|are you|what|how|why|when|where|who|which)/i.test(text)) {
+      return 'asking';
+    }
+    
+    // Check for page/diagram references
+    if (/(page\s+\d+|figure\s+\d+\.?\d*|diagram|look at|open to|flip to)/i.test(lowerText)) {
+      return 'referencing';
+    }
+    
+    // Check for clarification patterns
+    if (/(does that make sense|do you understand|are you following|is that clear|any questions)/i.test(lowerText)) {
+      return 'clarifying';
+    }
+    
+    // Check for waiting patterns
+    if (/(take your time|let me know when|i'll wait|ready\?)/i.test(lowerText)) {
+      return 'waiting';
+    }
+    
+    // Default to explaining
+    return 'explaining';
+  }, []);
+
+  const getStatusDisplay = useCallback((): StatusInfo => {
+    // Check if whiteboard is active first (highest priority)
+    if (whiteboardState.isActive) {
+      return { text: 'Writing on whiteboard...', color: 'orange', icon: 'pencil' };
+    }
+    
+    if (isMuted) {
+      return { text: 'Muted', color: 'zinc', icon: 'muted' };
+    }
+    
+    switch (status) {
+      case 'listening':
+        return { text: "I'm listening...", color: 'amber', icon: 'mic' };
+      case 'thinking':
+        return { text: 'Mama is thinking...', color: 'amber', icon: 'thinking' };
+      case 'explaining':
+        return { text: 'Mama is explaining...', color: 'green', icon: 'speaking' };
+      case 'clarifying':
+        return { text: 'Mama is clarifying...', color: 'green', icon: 'speaking' };
+      case 'creating-visual':
+        return { text: 'Mama is creating a visual...', color: 'purple', icon: 'image' };
+      case 'creating-video':
+        return { text: 'Mama is creating a video...', color: 'purple', icon: 'video' };
+      case 'asking':
+        return { text: 'Mama is asking...', color: 'blue', icon: 'question' };
+      case 'referencing':
+        return { text: 'Check your textbook...', color: 'blue', icon: 'book' };
+      case 'waiting':
+        return { text: 'Take your time...', color: 'blue', icon: 'thinking' };
+      default:
+        return { text: "I'm listening...", color: 'amber', icon: 'mic' };
+    }
+  }, [status, isMuted, whiteboardState.isActive]);
 
   const disconnect = useCallback((reason?: string) => {
     console.log("[GeminiLive] Disconnecting and cleaning up...", reason);
+
+    if (statusTimeoutRef.current) {
+      window.clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = null;
+    }
 
     if (sessionRef.current) {
       try {
@@ -77,18 +207,32 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
     setIsConnected(false);
     setIsConnecting(false);
     isConnectingRef.current = false;
-    setStatus(reason || 'Disconnected');
+    setStatus('listening');
     setIsSilent(false);
     setIsMuted(false);
     isMutedRef.current = false;
+    
+    // Reset whiteboard state
+    setWhiteboardState(DEFAULT_WHITEBOARD_STATE);
+    whiteboardBufferRef.current = '';
+    lastAiMessageRef.current = null;
 
-    // Trigger session save
+    // Trigger session save with the latest messages from ref
     if (onSessionEnd && messagesRef.current.length > 0) {
-      onSessionEnd(messagesRef.current);
+      console.log('[GeminiLive] Saving session with', messagesRef.current.length, 'messages');
+      console.log('[GeminiLive] Messages:', messagesRef.current);
+      onSessionEnd([...messagesRef.current]);
+    } else {
+      console.log('[GeminiLive] Not saving session - onSessionEnd:', !!onSessionEnd, 'messages count:', messagesRef.current.length);
     }
   }, [onSessionEnd]);
 
-  const connect = useCallback(async (systemInstruction: string, previousMessages?: SessionMessage[], initialImage?: string | null, videoElement?: HTMLVideoElement | null) => {
+  const connect = useCallback(async (
+    systemInstruction: string, 
+    previousMessages?: SessionMessage[], 
+    initialImage?: string | null, 
+    videoElement?: HTMLVideoElement | null
+  ) => {
     if (isConnectingRef.current || sessionRef.current) {
       console.log("[GeminiLive] Already connecting or connected, skipping...");
       return;
@@ -100,14 +244,16 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
       setIsMuted(false);
       setIsSilent(false);
       setMessages([]);
+      messagesRef.current = [];
       setCurrentImage(null);
+      setGeneratedMedia([]);
+      setCurrentMediaIndex(0);
       isConnectingRef.current = true;
       setIsConnecting(true);
-      setStatus('Requesting microphone access...');
+      setStatus('listening');
       console.log("[GeminiLive] Requesting mic access...");
 
       // 1. Setup Audio Contexts SYNCHRONOUSLY before any await!
-      // This is CRUCIAL for Safari/Chrome auto-play policies. It must be in the same synchronous block as the user click.
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       const audioContext = new AudioContextClass({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
@@ -128,14 +274,12 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
       mediaStreamRef.current = stream;
       console.log("[GeminiLive] Mic access granted.");
 
-      // Explicitly resume contexts now that we have the stream
       if (audioContext.state === 'suspended') await audioContext.resume();
       if (playbackContext.state === 'suspended') await playbackContext.resume();
 
-      setStatus('Connecting to Mama AI...');
+      setStatus('thinking');
       console.log("[GeminiLive] Connecting to Gemini API...");
 
-      // Initialize AI inside connect to ensure fresh key
       const getApiKey = () => {
         if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
           return process.env.API_KEY;
@@ -162,6 +306,77 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
         }
       };
 
+      const addWhiteboardStepDeclaration: FunctionDeclaration = {
+        name: "add_whiteboard_step",
+        description: "Add ONE step to the whiteboard at a time. Call this once per step to build up a solution progressively — like a teacher writing on a physical whiteboard. PAUSE between steps to ask the student questions and check understanding. Do NOT add all steps in one call.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            title: {
+              type: Type.STRING,
+              description: "Problem title — ONLY include on the very first step (e.g. 'Symmetric Relations Proof', 'Quadratic Formula'). Omit for subsequent steps."
+            },
+            math: {
+              type: Type.STRING,
+              description: "LaTeX formula for this step. Use standard LaTeX: \\frac{a}{b} for fractions, \\sqrt{x} for roots, x^{2} for powers, \\pm for ±, \\in for ∈, \\Rightarrow for ⟹, \\perp for ⊥."
+            },
+            explanation: {
+              type: Type.STRING,
+              description: "Short label for what this step shows (e.g. 'Standard quadratic form', 'Apply the formula', 'Substitute values'). Displayed below the math."
+            }
+          },
+          required: ["math", "explanation"]
+        }
+      };
+
+      const highlightWhiteboardStepDeclaration: FunctionDeclaration = {
+        name: "highlight_whiteboard_step",
+        description: "Highlight and scroll to a specific step already on the whiteboard. Use this to draw the student's attention back to an earlier step when referencing it (e.g. 'As we wrote in step 1...').",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            stepIndex: {
+              type: Type.NUMBER,
+              description: "Zero-based index of the step to highlight (first step = 0, second = 1, etc.)"
+            }
+          },
+          required: ["stepIndex"]
+        }
+      };
+
+      const clearWhiteboardDeclaration: FunctionDeclaration = {
+        name: "clear_whiteboard",
+        description: "Clear all steps from the whiteboard to start fresh for a new problem.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {}
+        }
+      };
+
+      const generateVideoDeclaration: FunctionDeclaration = {
+        name: "generate_video",
+        description: "Generates an 8-second silent educational animation video to demonstrate a complex concept or physical process. Use this when explaining dynamic phenomena (osmosis, forces, chemical reactions, planetary motion, etc.) that would benefit from visual animation. This creates a video that will appear in the media gallery while you continue explaining.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            concept: {
+              type: Type.STRING,
+              description: "The specific concept or process to visualize (e.g., 'osmosis through semipermeable membrane', 'projectile motion with initial velocity', 'acid-base neutralization reaction'). Be specific and detailed."
+            },
+            topicName: {
+              type: Type.STRING,
+              description: "The topic or chapter name this concept belongs to (e.g., 'Cell Transport', 'Mechanics', 'Chemical Reactions'). Used for caching."
+            },
+            theme: {
+              type: Type.STRING,
+              enum: ["realistic", "space", "anime", "historical", "action"],
+              description: "Visual theme for the animation. 'realistic' for photorealistic scientific accuracy, 'space' for cosmic/physics themes, 'anime' for stylized youth-friendly, 'historical' for vintage documentary feel, 'action' for high-energy comic style."
+            }
+          },
+          required: ["concept"]
+        }
+      };
+
       let finalSystemInstruction = systemInstruction;
       if (previousMessages && previousMessages.length > 0) {
         const historyText = previousMessages.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n');
@@ -172,17 +387,24 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
         finalSystemInstruction += `\n\n--- VISUAL HOMEWORK / CAMERA INPUT ---\nThe user has uploaded an image of their homework or a problem they are working on. You will receive this image immediately. Acknowledge the image and ask how you can help with it.`;
       }
 
-      // 3. Connect to Gemini Live API
+      // 3. Connect to Gemini Live API with selected voice
+      // Lab/Exam: latest (better rate limits); Tutor: preview
+      const liveModel = mode === 'tutor'
+        ? 'gemini-2.5-flash-native-audio-preview-12-2025'
+        : 'gemini-2.5-flash-native-audio-latest';
       const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash',
+        model: liveModel,
         config: {
-          tools: [{ functionDeclarations: [generateImageDeclaration] }],
+          tools: [{ functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration] }],
           responseModalities: [Modality.AUDIO],
           speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } }
+            voiceConfig: { 
+              prebuiltVoiceConfig: { 
+                voiceName: VOICE_NAME_MAP[voiceName] 
+              } 
+            }
           },
           systemInstruction: finalSystemInstruction,
-          // Re-enable transcriptions for debugging
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
@@ -192,7 +414,7 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
             setIsConnected(true);
             setIsConnecting(false);
             isConnectingRef.current = false;
-            setStatus('Listening...');
+            setStatus('listening');
 
             if (initialImage) {
               try {
@@ -212,10 +434,8 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
             }
 
             const source = audioContext.createMediaStreamSource(stream);
-
-            // Add a gain node to boost the mic signal if it's too quiet
             const gainNode = audioContext.createGain();
-            gainNode.gain.value = 2.0; // Boost by 2x
+            gainNode.gain.value = 2.0;
 
             const processor = audioContext.createScriptProcessor(4096, 1, 1);
             processorRef.current = processor;
@@ -223,14 +443,9 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
             let packetCount = 0;
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-
-              // MUTE CHECK: use the ref (not state) to avoid stale closure bug.
-              // When muted, skip sending audio entirely to suppress mic input.
               if (isMutedRef.current) return;
 
               const base64Data = float32ToPcm16Base64(inputData);
-
-              // Calculate RMS volume to verify mic is picking up sound
               let sum = 0;
               for (let i = 0; i < inputData.length; i++) {
                 sum += inputData[i] * inputData[i];
@@ -241,7 +456,7 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
               if (packetCount % 50 === 0) {
                 console.log(`[GeminiLive] Sent ${packetCount} audio packets... Mic RMS: ${rms.toFixed(4)}`);
                 if (rms < 0.001) {
-                  console.warn("[GeminiLive] Warning: Microphone audio is completely silent. Check your OS mic settings.");
+                  console.warn("[GeminiLive] Warning: Microphone audio is completely silent.");
                   setIsSilent(true);
                 } else {
                   setIsSilent(false);
@@ -287,24 +502,66 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
           },
           onmessage: async (message: LiveServerMessage) => {
             if (message.setupComplete) console.log("[GeminiLive] Setup complete received.");
-            if (message.serverContent?.turnComplete) console.log("[GeminiLive] AI turn complete.");
+            if (message.serverContent?.turnComplete) {
+              console.log("[GeminiLive] AI turn complete.");
+            }
 
-            // Handle Tool Calls (Image Generation)
+            // Handle Tool Calls (Whiteboard, Image, Video Generation)
             if (message.toolCall && message.toolCall.functionCalls) {
+              setStatus('creating-visual');
               const calls = message.toolCall.functionCalls;
               const responses = await Promise.all(calls.map(async (call) => {
+                if (call.name === 'add_whiteboard_step') {
+                  const args = call.args as any;
+                  console.log('[GeminiLive] add_whiteboard_step called:', args.math);
+                  setWhiteboardState(prev => {
+                    const newStep: WhiteboardStep = {
+                      id: `step-${prev.steps.length}-${Date.now()}`,
+                      math: args.math || '',
+                      explanation: args.explanation || '',
+                      decode: '',
+                      status: 'typing' as const,  // Trigger typewriter animation
+                      spokenText: '',
+                      isSpeaking: true,
+                    };
+                    return {
+                      isActive: true,
+                      problemTitle: args.title || prev.problemTitle || 'Solution',
+                      steps: [...prev.steps, newStep],
+                      currentStepIndex: prev.steps.length,  // Index of the new step
+                      highlightedStepIndex: undefined,
+                      isTyping: true,
+                    };
+                  });
+                  setStatus('whiteboard');
+                  return { id: call.id, name: call.name, response: { result: 'Step added to whiteboard. The student is reading it. Continue explaining or ask a question.' } };
+                }
+
+                if (call.name === 'highlight_whiteboard_step') {
+                  const args = call.args as any;
+                  const idx = typeof args.stepIndex === 'number' ? args.stepIndex : 0;
+                  console.log('[GeminiLive] highlight_whiteboard_step:', idx);
+                  setWhiteboardState(prev => ({ ...prev, highlightedStepIndex: idx }));
+                  return { id: call.id, name: call.name, response: { result: `Step ${idx + 1} is now highlighted on the whiteboard.` } };
+                }
+
+                if (call.name === 'clear_whiteboard') {
+                  console.log('[GeminiLive] clear_whiteboard called');
+                  setWhiteboardState(DEFAULT_WHITEBOARD_STATE);
+                  return { id: call.id, name: call.name, response: { result: 'Whiteboard cleared.' } };
+                }
+
                 if (call.name === 'generate_image') {
                   const prompt = (call.args as any).prompt;
                   console.log("[GeminiLive] Generating image for prompt:", prompt);
                   setIsGeneratingImage(true);
                   try {
-                    // Create a fresh instance to ensure it picks up the latest key if changed
                     const imageAi = new GoogleGenAI({ apiKey: getApiKey() });
                     const imageResponse = await imageAi.models.generateContent({
                       model: 'gemini-3.1-flash-image-preview',
-                      contents: { parts: [{ text: prompt }] },
+                      contents: { parts: [{ text: prompt + '\n\nCRITICAL: Generate in 9:16 portrait format (tall, vertical). Height is greater than width.' }] },
                       config: {
-                        imageConfig: { aspectRatio: "16:9", imageSize: "1K" }
+                        responseModalities: ['TEXT', 'IMAGE'],
                       }
                     });
 
@@ -318,7 +575,17 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
 
                     if (base64Image) {
                       setCurrentImage(base64Image);
-                      setMessages(prev => {
+                      const mediaItem: GeneratedMedia = {
+                        type: 'image',
+                        url: base64Image,
+                        prompt,
+                        timestamp: Date.now(),
+                        caption: 'Generated visual aid'
+                      };
+                      setGeneratedMedia(prev => [...prev, mediaItem]);
+                      setCurrentMediaIndex(prev => prev + 1);
+                      
+                      updateMessages(prev => {
                         const last = prev[prev.length - 1];
                         if (last && last.role === 'ai') {
                           return [...prev.slice(0, -1), { ...last, image: base64Image }];
@@ -336,6 +603,88 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
                     setIsGeneratingImage(false);
                   }
                 }
+
+                if (call.name === 'generate_video') {
+                  const { concept, topicName, theme } = call.args as any;
+                  console.log("[GeminiLive] Starting video generation for concept:", concept);
+                  setStatus('creating-video');
+                  
+                  try {
+                    const auth = getAuth();
+                    const userId = auth.currentUser?.uid;
+                    
+                    if (!userId) {
+                      return { id: call.id, name: call.name, response: { success: false, message: "User not authenticated" } };
+                    }
+
+                    // Generate a session ID for this voice session
+                    const sessionId = `voice_${Date.now()}`;
+                    
+                    // Start async job (fire-and-forget pattern)
+                    const jobId = await startVideoGenerationJob(
+                      concept,
+                      userId,
+                      sessionId,
+                      undefined, // legacySlideId - not needed for voice mode
+                      {
+                        topicName: topicName || concept,
+                        theme: theme || 'realistic',
+                        aspectRatio: '9:16'
+                      }
+                    );
+
+                    // Set up subscription to get video when ready
+                    const unsubscribe = subscribeToVideoJobs(userId, sessionId, (jobs: VideoJob[]) => {
+                      const completedJob = jobs.find(j => j.id === jobId && j.status === 'completed');
+                      if (completedJob?.videoUrl) {
+                        console.log("[GeminiLive] Video ready:", completedJob.videoUrl);
+                        
+                        const mediaItem: GeneratedMedia = {
+                          type: 'video',
+                          url: completedJob.videoUrl,
+                          prompt: concept,
+                          timestamp: Date.now(),
+                          caption: `Animation: ${concept}`
+                        };
+                        
+                        setGeneratedMedia(prev => [...prev, mediaItem]);
+                        setCurrentMediaIndex(prev => prev + 1);
+                        
+                        // Auto-select the new video
+                        setCurrentImage(null); // Clear any current image
+                        
+                        // Add video to messages for session history
+                        updateMessages(prev => {
+                          const last = prev[prev.length - 1];
+                          if (last && last.role === 'ai') {
+                            return [...prev.slice(0, -1), { ...last, video: completedJob.videoUrl }];
+                          }
+                          return [...prev, { role: 'ai', text: `Generated video: ${concept}`, video: completedJob.videoUrl }];
+                        });
+                        
+                        // Unsubscribe after getting the video
+                        unsubscribe();
+                      }
+                    });
+                    
+                    // Track subscription for cleanup
+                    videoJobUnsubscribersRef.current.push(unsubscribe);
+
+                    return { 
+                      id: call.id, 
+                      name: call.name, 
+                      response: { 
+                        success: true, 
+                        message: `Started generating video for "${concept}". The animation will appear in the gallery shortly (usually 30-60 seconds). Continue your explanation while the video generates.`
+                      } 
+                    };
+                  } catch (e: any) {
+                    console.error("[GeminiLive] Video generation error:", e);
+                    return { id: call.id, name: call.name, response: { success: false, message: e.message } };
+                  } finally {
+                    setStatus('explaining');
+                  }
+                }
                 return { id: call.id, name: call.name, response: { success: false, message: "Unknown function" } };
               }));
 
@@ -350,7 +699,25 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
               for (const part of parts) {
                 if (part.text) {
                   console.log("[GeminiLive] AI Text Response:", part.text);
-                  // We rely on outputTranscript for cleaner text, but fallback to part.text if needed
+                  // Add AI text to messages (avoid duplicates with audio transcription)
+                  const now = Date.now();
+                  const recentText = lastAiMessageRef.current?.text || '';
+                  const isDuplicate = recentText && (
+                    recentText.includes(part.text) || 
+                    part.text.includes(recentText) ||
+                    (now - (lastAiMessageRef.current?.timestamp || 0) < 1000)
+                  );
+                  
+                  if (!isDuplicate) {
+                    updateMessages(prev => {
+                      const last = prev[prev.length - 1];
+                      if (last && last.role === 'ai') {
+                        return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + part.text }];
+                      }
+                      return [...prev, { role: 'ai', text: part.text }];
+                    });
+                    lastAiMessageRef.current = { text: part.text, timestamp: now };
+                  }
                 }
                 if (part.inlineData && part.inlineData.data && playbackContextRef.current) {
                   if (playbackContextRef.current.state === 'suspended') {
@@ -372,12 +739,15 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
               }
             }
 
-            // Extract transcriptions based on API structure
-            // @ts-ignore - exploring undocumented properties
+            // Extract transcriptions
+            // @ts-ignore
             const inputTranscript = message.serverContent?.inputAudioTranscription?.text || message.inputAudioTranscription?.text || message.serverContent?.clientContent?.parts?.[0]?.text;
             if (inputTranscript) {
               console.log("[GeminiLive] User Transcript:", inputTranscript);
-              setMessages(prev => {
+              setStatus('thinking');
+              currentAiTextRef.current = '';
+              
+              updateMessages(prev => {
                 const last = prev[prev.length - 1];
                 if (last && last.role === 'user') {
                   return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + inputTranscript }];
@@ -390,17 +760,123 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
             const outputTranscript = message.serverContent?.outputAudioTranscription?.text || message.outputAudioTranscription?.text;
             if (outputTranscript) {
               console.log("[GeminiLive] AI Transcript:", outputTranscript);
-              setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.role === 'ai') {
-                  return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + outputTranscript }];
-                }
-                return [...prev, { role: 'ai', text: outputTranscript }];
+              currentAiTextRef.current += ' ' + outputTranscript;
+              
+              // Detect smart status based on accumulated text
+              const smartStatus = detectSmartStatus(currentAiTextRef.current);
+              setStatus(smartStatus);
+              
+              // Process whiteboard markers
+              const previousStepCount = whiteboardState.steps.length;
+              whiteboardBufferRef.current += outputTranscript;
+              const parsed = parseWhiteboardChunk(whiteboardBufferRef.current, {
+                isActive: whiteboardState.isActive,
+                stepsCount: previousStepCount
               });
+              
+              // Handle whiteboard state changes
+              if (parsed.isWhiteboardStart) {
+                console.log('[GeminiLive] Whiteboard started:', parsed.problemTitle);
+                setWhiteboardState({
+                  isActive: true,
+                  problemTitle: parsed.problemTitle || 'Problem',
+                  steps: [],
+                  currentStepIndex: -1,
+                  isTyping: false,
+                });
+                whiteboardBufferRef.current = '';
+              }
+              
+              if (parsed.newStep) {
+                console.log('[GeminiLive] New whiteboard step:', parsed.newStep.math);
+                setWhiteboardState(prev => {
+                  // Mark previous step as complete if exists
+                  const updatedSteps = prev.steps.map((step, idx) => 
+                    idx === prev.currentStepIndex 
+                      ? { ...step, status: 'complete' as const, isSpeaking: false }
+                      : step
+                  );
+                  
+                  // Add new step
+                  const newStep: WhiteboardStep = { 
+                    ...parsed.newStep!, 
+                    status: 'typing' as const,
+                    spokenText: '',
+                    isSpeaking: true,
+                  };
+                  
+                  return {
+                    ...prev,
+                    steps: [...updatedSteps, newStep],
+                    currentStepIndex: updatedSteps.length,
+                    isTyping: true,
+                  };
+                });
+              }
+              
+              // Accumulate transcript for current whiteboard step
+              // Use functional updater to always read fresh prev state (avoids stale closure)
+              setWhiteboardState(prev => {
+                if (!prev.isActive || prev.currentStepIndex < 0) return prev;
+                const currentStep = prev.steps[prev.currentStepIndex];
+                if (!currentStep) return prev;
+                const updatedSteps = [...prev.steps];
+                updatedSteps[prev.currentStepIndex] = {
+                  ...currentStep,
+                  spokenText: (currentStep.spokenText || '') + ' ' + outputTranscript,
+                  isSpeaking: true,
+                };
+                return { ...prev, steps: updatedSteps };
+              });
+              
+              if (parsed.isWhiteboardEnd) {
+                console.log('[GeminiLive] Whiteboard ended');
+                setWhiteboardState(prev => {
+                  // Mark current step as complete
+                  const updatedSteps = prev.steps.map((step, idx) => 
+                    idx === prev.currentStepIndex 
+                      ? { ...step, status: 'complete' as const, isSpeaking: false }
+                      : step
+                  );
+                  return {
+                    ...prev,
+                    steps: updatedSteps,
+                    isActive: false,
+                    isTyping: false,
+                  };
+                });
+                whiteboardBufferRef.current = '';
+              }
+              
+              // Clean text for message display
+              const cleanText = cleanWhiteboardMarkers(outputTranscript);
+              
+              if (cleanText.trim()) {
+                const now = Date.now();
+                const recentText = lastAiMessageRef.current?.text || '';
+                const isDuplicate = recentText && (
+                  recentText.includes(cleanText) || 
+                  cleanText.includes(recentText) ||
+                  (now - (lastAiMessageRef.current?.timestamp || 0) < 1000)
+                );
+                
+                if (!isDuplicate) {
+                  updateMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last && last.role === 'ai') {
+                      return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + cleanText }];
+                    }
+                    return [...prev, { role: 'ai', text: cleanText }];
+                  });
+                  lastAiMessageRef.current = { text: cleanText, timestamp: now };
+                }
+              }
             }
 
             if (message.serverContent?.interrupted) {
               console.log("[GeminiLive] Interrupted.");
+              setStatus('listening');
+              currentAiTextRef.current = '';
               if (playbackContextRef.current) {
                 playbackContextRef.current.close();
                 const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -425,16 +901,16 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
     } catch (error: any) {
       console.error("[GeminiLive] Failed to connect:", error);
       disconnect(`Error: ${error.message}`);
+      throw error; // Allow callers to react to connection failure
     }
-  }, [disconnect]);
+  }, [disconnect, updateMessages, detectSmartStatus, voiceName, mode]);
 
   const toggleMute = useCallback(() => {
-    // Flip the ref immediately — the onaudioprocess reads this ref on every tick.
     const newMuted = !isMutedRef.current;
     isMutedRef.current = newMuted;
     setIsMuted(newMuted);
+    setStatus(newMuted ? 'muted' : 'listening');
 
-    // Also disable the OS-level track so the browser mic indicator updates
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getAudioTracks().forEach(track => {
         track.enabled = !newMuted;
@@ -445,32 +921,94 @@ export function useGeminiLive(onSessionEnd?: (messages: SessionMessage[]) => voi
     return newMuted;
   }, []);
 
-  const sendClientMessage = useCallback((text: string) => {
+  const sendClientMessage = useCallback((text: string, imageData?: string) => {
     if (sessionRef.current && isConnected) {
-      console.log("[GeminiLive] Sending client message:", text);
+      console.log("[GeminiLive] Sending client message:", text, imageData ? "with image" : "");
+      
+      const parts: any[] = [{ text }];
+      
+      // Add image if provided (base64 data URL)
+      if (imageData) {
+        // Extract mime type and base64 data from data URL
+        const match = imageData.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          const [, mimeType, base64Data] = match;
+          parts.push({
+            inlineData: {
+              mimeType,
+              data: base64Data
+            }
+          });
+        }
+      }
+      
       sessionRef.current.send({
         clientContent: {
-          turns: [{ role: 'user', parts: [{ text }] }],
+          turns: [{ role: 'user', parts }],
           turnComplete: true
         }
       });
-      // Add to local message list securely so we see it in debug logs
-      setMessages(prev => [...prev, { role: 'user', text: `*[System]* ${text}` }]);
+      
+      // Add to messages with image indicator
+      const displayText = imageData ? `${text} [📷 Image shared]` : `*[System]* ${text}`;
+      updateMessages(prev => [...prev, { role: 'user', text: displayText }]);
     }
-  }, [isConnected]);
+  }, [isConnected, updateMessages]);
+
+  // Navigation for media gallery
+  const nextMedia = useCallback(() => {
+    setCurrentMediaIndex(prev => Math.min(prev + 1, generatedMedia.length - 1));
+    setCurrentImage(generatedMedia[Math.min(currentMediaIndex + 1, generatedMedia.length - 1)]?.url || null);
+  }, [generatedMedia, currentMediaIndex]);
+
+  const prevMedia = useCallback(() => {
+    setCurrentMediaIndex(prev => Math.max(prev - 1, 0));
+    setCurrentImage(generatedMedia[Math.max(currentMediaIndex - 1, 0)]?.url || null);
+  }, [generatedMedia, currentMediaIndex]);
+
+  // Mark a step as complete when its typewriter animation finishes
+  const completeWhiteboardStep = useCallback((stepIndex: number) => {
+    setWhiteboardState(prev => {
+      const updatedSteps = [...prev.steps];
+      if (updatedSteps[stepIndex]) {
+        updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], status: 'complete', isSpeaking: false };
+      }
+      return {
+        ...prev,
+        steps: updatedSteps,
+        isTyping: false,
+      };
+    });
+  }, []);
+
+  // Clear whiteboard manually
+  const clearWhiteboard = useCallback(() => {
+    setWhiteboardState(DEFAULT_WHITEBOARD_STATE);
+    whiteboardBufferRef.current = '';
+  }, []);
 
   return {
     isConnected,
     isConnecting,
     status,
+    statusDisplay: getStatusDisplay(),
     messages,
     isSilent,
     isMuted,
     currentImage,
     isGeneratingImage,
+    isGeneratingVideo,
+    generatedMedia,
+    currentMediaIndex,
+    whiteboardState,
     connect,
     disconnect,
     toggleMute,
-    sendClientMessage
+    sendClientMessage,
+    nextMedia,
+    prevMedia,
+    setCurrentImage,
+    completeWhiteboardStep,
+    clearWhiteboard,
   };
 }

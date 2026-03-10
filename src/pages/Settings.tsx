@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, Mic, PlaySquare, Settings as SettingsIcon } from 'lucide-react';
-import { UserProfile } from '../hooks/useProfile';
+import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, Mic, PlaySquare, Settings as SettingsIcon, Volume2, Play, AlertCircle } from 'lucide-react';
+import { UserProfile, GEMINI_VOICES, GeminiVoice } from '../hooks/useProfile';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
 import { db } from '../firebase';
+import { generateVoicePreview } from '../services/voicePreview';
 
 const HOBBIES = [
   { id: 'cricket', label: 'Cricket', icon: Trophy },
@@ -37,9 +38,36 @@ export default function Settings() {
   const navigate = useNavigate();
   const { userProfile, currentUser, refreshProfile, logout } = useAuth();
 
-  const [formData, setFormData] = useState<UserProfile>(userProfile || { name: '', age: '', gender: '', hobbies: [], learningStyle: '', theme: 'realistic', voiceSpeed: 'normal', autoAdvanceCarousel: true });
+  const [formData, setFormData] = useState<UserProfile>(userProfile || { 
+    name: '', age: '', gender: '', hobbies: [], learningStyle: '', 
+    theme: 'realistic', voiceSpeed: 'normal', voiceName: 'Victoria', 
+    autoAdvanceCarousel: true
+  });
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'account' | 'profile' | 'preferences'>('account');
+  
+  // Voice preview state
+  const [playingVoice, setPlayingVoice] = useState<GeminiVoice | null>(null);
+  const [isLoadingVoice, setIsLoadingVoice] = useState<GeminiVoice | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      stopAudio();
+    };
+  }, []);
+
+  // Helper to stop and cleanup audio
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setPlayingVoice(null);
+  };
 
   useEffect(() => {
     if (userProfile) {
@@ -58,6 +86,64 @@ export default function Settings() {
         : [...(prev.hobbies || []), hobbyId];
       return { ...prev, hobbies };
     });
+  };
+
+  // Handle voice preview playback
+  const handleVoicePreview = async (voiceId: GeminiVoice, e: MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    setVoiceError(null);
+    
+    // If already playing this voice, stop it
+    if (playingVoice === voiceId) {
+      stopAudio();
+      return;
+    }
+    
+    // Stop any currently playing audio
+    stopAudio();
+    
+    setIsLoadingVoice(voiceId);
+    
+    try {
+      // Generate preview with personalized text
+      const audioUrl = await generateVoicePreview(voiceId, GEMINI_VOICES, formData.name);
+      
+      // Create new audio element
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      
+      // Set up event handlers
+      audio.onended = () => {
+        setPlayingVoice(null);
+        audioRef.current = null;
+      };
+      
+      audio.onerror = () => {
+        setPlayingVoice(null);
+        setIsLoadingVoice(null);
+        audioRef.current = null;
+      };
+      
+      // Start playing
+      await audio.play();
+      setIsLoadingVoice(null);
+      setPlayingVoice(voiceId);
+      
+    } catch (error: any) {
+      console.error('Failed to play voice preview:', error);
+      setIsLoadingVoice(null);
+      setPlayingVoice(null);
+      
+      if (error.message?.includes('Rate limit') || error.message?.includes('quota')) {
+        setVoiceError('Too many previews. Please wait 10 seconds and try again.');
+      } else {
+        setVoiceError('Preview failed. Please try again.');
+      }
+      
+      setTimeout(() => setVoiceError(null), 3000);
+    }
   };
 
   const handleSave = async () => {
@@ -283,6 +369,7 @@ export default function Settings() {
         {activeTab === 'preferences' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
 
+            {/* Visual Theme */}
             <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm">
               <div className="flex items-center gap-2 text-zinc-800">
                 <SettingsIcon size={18} className="text-[#fe9900]" />
@@ -314,6 +401,85 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* AI Voice Selection with Preview */}
+            <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm">
+              <div className="flex items-center gap-2 text-zinc-800">
+                <Volume2 size={18} className="text-purple-500" />
+                <h2 className="text-sm font-bold uppercase tracking-wider">AI Voice</h2>
+              </div>
+              <p className="text-xs text-zinc-500 font-medium leading-relaxed">
+                Choose your tutor&apos;s voice. Tap the play button to hear them introduce themselves.
+              </p>
+              
+              {/* Error message */}
+              {voiceError && (
+                <div className="bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-2">
+                  <AlertCircle size={16} className="text-red-500 shrink-0" />
+                  <p className="text-xs text-red-600">{voiceError}</p>
+                </div>
+              )}
+              
+              <div className="space-y-2 pt-2">
+                {GEMINI_VOICES.map(voice => {
+                  const isSelected = formData.voiceName === voice.id || (!formData.voiceName && voice.id === 'Victoria');
+                  const isPlaying = playingVoice === voice.id;
+                  const isLoading = isLoadingVoice === voice.id;
+                  
+                  return (
+                    <div
+                      key={voice.id}
+                      className={`w-full flex items-center gap-3 p-3 rounded-2xl border transition-all shadow-sm ${isSelected
+                        ? 'bg-purple-50 border-purple-300'
+                        : 'bg-zinc-50 border-zinc-200 hover:border-purple-200'
+                        }`}
+                    >
+                      {/* Play/Pause Button */}
+                      <button
+                        onClick={(e) => handleVoicePreview(voice.id, e)}
+                        disabled={isLoading}
+                        className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+                          isPlaying 
+                            ? 'bg-purple-500 text-white animate-pulse' 
+                            : isLoading
+                              ? 'bg-purple-200 text-purple-500'
+                              : 'bg-white border border-zinc-200 text-zinc-500 hover:text-purple-500 hover:border-purple-300'
+                        }`}
+                      >
+                        {isLoading ? (
+                          <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                        ) : isPlaying ? (
+                          <Volume2 size={18} />
+                        ) : (
+                          <Play size={18} className="ml-0.5" />
+                        )}
+                      </button>
+                      
+                      {/* Voice Info - Click to select */}
+                      <button
+                        onClick={() => setFormData({ ...formData, voiceName: voice.id })}
+                        className="flex-1 text-left"
+                      >
+                        <span className={`font-bold text-sm block ${isSelected ? 'text-purple-900' : 'text-zinc-700'}`}>
+                          {voice.label}
+                        </span>
+                        <span className={`text-xs ${isSelected ? 'text-purple-600' : 'text-zinc-400'}`}>
+                          {voice.description}
+                        </span>
+                      </button>
+                      
+                      {/* Selection indicator */}
+                      {isSelected && (
+                        <div className="shrink-0 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center">
+                          <CheckCircle2 size={14} className="text-white" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Voice Speed */}
             <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm">
               <div className="flex items-center gap-2 text-zinc-800 mb-2">
                 <Mic size={18} className="text-[#fe9900]" />
@@ -335,6 +501,7 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* Auto-Advance Carousel */}
             <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm flex items-center justify-between">
               <div className="pr-4">
                 <div className="flex items-center gap-2 text-zinc-800 mb-1">

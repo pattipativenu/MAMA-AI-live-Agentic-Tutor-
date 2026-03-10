@@ -5,39 +5,34 @@ import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useSessions } from '../../hooks/useSessions';
 
-export const getLabSystemInstruction = (profile: UserProfile) => {
-  let profileContext = "";
-  if (profile.age || profile.gender || profile.hobbies.length > 0 || profile.learningStyle) {
-    profileContext = `\n\n--- STUDENT PROFILE ---\n`;
-    if (profile.age) profileContext += `Age/Grade: ${profile.age}\n`;
-    if (profile.gender) profileContext += `Gender: ${profile.gender}\n`;
-    if (profile.hobbies.length > 0) profileContext += `Favourite Activities/Hobbies: ${profile.hobbies.join(', ')}\n`;
-    if (profile.learningStyle) profileContext += `Preferred Learning Style: ${profile.learningStyle}\n`;
-    profileContext += `DO NOT ask the student for this information again, you already know it. Tailor all your examples, analogies, and image generation prompts specifically to their age, gender, and favourite activities.\n`;
-  }
-
+// Simple system instruction that works even without profile
+const getLabSystemInstruction = (profile: UserProfile | null) => {
+  const name = profile?.name?.split(' ')[0] || 'student';
+  const age = profile?.age || 'High School';
+  const hobbies = profile?.hobbies?.join(', ') || 'various activities';
+  
   return `
-      You are Mama AI, a warm, encouraging, and patient voice-first AI tutor for students in Classes 5 through 12.
-      The student is entering "Lab Mode". You teach Science (Physics, Chemistry, Biology) and Math.
-      ${profileContext}
-      CRITICAL TEACHING RULES:
-      1. AGE & PERSONALIZATION FIRST: Politely ask the student for their age/grade, gender, and their favourite activity/hobby (e.g., a sport, reading, drawing) before explaining complex topics ONLY IF it is not provided in the profile above. DO NOT assume their favourite activity. Use their chosen activity to personalise your examples.
-      2. REAL-WORLD FIRST: Whenever you explain a concept, you MUST first use a simple, relatable real-world example tailored to their age and chosen activity.
-      3. SCIENCE/MATH SECOND: Only after the real-world example should you explain the formal language, formulas, and principles.
-      4. INTERACTIVE LEARNING: Encourage the student to perform simple, physical actions to understand concepts. Also, ask them to write down formulas or draw diagrams on a piece of paper.
-      5. VISUAL AIDS (CRITICAL): When explaining dimensions, geometry, or any visual concept, you MUST use the \`generate_image\` tool.
-         - The image prompt MUST be highly detailed, including specific measurements, dimensions, labels, etc.
-         - Tailor the visual complexity to their age: for young kids, use simple, fun visuals without complex formulas. For older teens (Class 11/12), include advanced formulas, vectors, or graphs.
-         - NEVER include the text "Class X" or the student's grade in the image prompt text.
-         - Tell the user you are generating an image for them.
-      6. QUIZ & VERIFY: After explaining, ask if they understood. If they say yes, give them a quick quiz question to test their knowledge. If they answer incorrectly, gently point out what they got right, where they went wrong, and explain it again clearly.
+You are Mama AI, a warm, encouraging AI tutor for ${name}, a ${age} student.
 
-      CRITICAL SAFETY RULE:
-      If you ask the student to pick up, throw, or use an object, you MUST explicitly specify safe, non-harmful objects (like paper, a feather, or a soft pillow). NEVER suggest or allow the use of heavy, sharp, or breakable objects (like glass, phones, scissors, or hard plastics). You must actively ensure their physical safety in your suggestions.
+You are in LAB MODE - helping with hands-on science experiments.
 
-      Keep your responses concise, conversational, and natural. Do not use markdown or formatting. Speak directly to the student.
-      Start by asking them what topic or experiment they want to explore today.
-    `;
+STUDENT PROFILE:
+- Name: ${name}
+- Grade: ${age}
+- Interests: ${hobbies}
+
+CRITICAL RULES:
+1. Be warm and personal - use "${name}" occasionally
+2. Give step-by-step guidance for experiments
+3. Explain the science behind what they observe
+4. ALWAYS prioritize safety - warn about hot items, chemicals, sharp objects
+5. If they show you something via camera, describe what you see and explain it
+6. Use the generate_image tool to create diagrams when helpful
+7. Ask questions to check understanding
+8. Keep responses conversational and concise
+
+When the student is ready to start, ask: "What experiment would you like to do today, ${name}?"
+`;
 };
 
 export default function LabEntry() {
@@ -48,12 +43,12 @@ export default function LabEntry() {
   const { profile } = useProfile();
   const { sessions, saveSession } = useSessions();
 
-  // Stable session ID — generated once at mount
+  // Session state
   const sessionIdRef = useRef(Date.now().toString());
-
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isVideoActive, setIsVideoActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -63,16 +58,29 @@ export default function LabEntry() {
     isConnected, isConnecting, isSilent, isMuted,
     currentImage, isGeneratingImage,
     connect, disconnect, toggleMute,
-  } = useGeminiLive((msgs) => {
+  } = useGeminiLive('lab', (msgs) => {
     saveSession('lab', msgs, sessionIdRef.current);
   });
 
+  // Auto-connect mic on mount
+  useEffect(() => {
+    // Small delay to ensure everything is ready
+    const timer = setTimeout(() => {
+      if (!isConnected && !isConnecting) {
+        handleConnect(selectedImage, null);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopVideo();
       disconnect();
     };
-  }, [disconnect]);
+  }, []);
 
   const stopVideo = () => {
     if (streamRef.current) {
@@ -85,40 +93,66 @@ export default function LabEntry() {
   const startVideo = async () => {
     setCameraError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } 
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
       streamRef.current = stream;
       setIsVideoActive(true);
       setSelectedImage(null);
-      handleConnect(null, videoRef.current);
+      
+      // Auto-connect when video starts
+      await handleConnect(null, videoRef.current);
     } catch (err: any) {
-      console.error("Failed to start video:", err);
+      console.error("[Lab] Failed to start video:", err);
+      
+      // Provide user-friendly error messages
+      let errorMessage = 'Could not access camera';
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setCameraError('Camera permission denied. Please allow camera access in your browser settings and try again.');
+        errorMessage = 'Camera permission denied. Please allow camera access in your browser settings and try again.';
       } else if (err.name === 'NotFoundError') {
-        setCameraError('No camera found on this device.');
-      } else {
-        setCameraError('Could not access the camera. Please check your browser settings.');
+        errorMessage = 'No camera found on this device.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage = 'Camera is already in use by another app. Please close other apps using the camera.';
+      } else if (err.name === 'OverconstrainedError') {
+        errorMessage = 'Camera does not support the requested settings. Trying default camera...';
+        // Fallback to any available camera
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          if (videoRef.current) {
+            videoRef.current.srcObject = fallbackStream;
+          }
+          streamRef.current = fallbackStream;
+          setIsVideoActive(true);
+          setSelectedImage(null);
+          await handleConnect(null, videoRef.current);
+          setCameraError(null);
+          return;
+        } catch (fallbackErr) {
+          errorMessage = 'Could not access any camera on this device.';
+        }
       }
+      
+      setCameraError(errorMessage);
     }
   };
 
   const toggleVideo = () => {
     if (isVideoActive) {
       stopVideo();
-      disconnect();
     } else {
       startVideo();
     }
   };
 
-  const handleMicClick = () => {
+  const handleMicClick = async () => {
+    setError(null);
     if (isConnected) {
       toggleMute();
     } else {
-      handleConnect(selectedImage, null);
+      await handleConnect(selectedImage, null);
     }
   };
 
@@ -136,38 +170,72 @@ export default function LabEntry() {
     }
   };
 
-  const handleConnect = (image: string | null = selectedImage, videoEl: HTMLVideoElement | null = null) => {
-    const instruction = getLabSystemInstruction(profile);
-    let previousMessages;
-    if (resumeId) {
-      const session = sessions.find(s => s.id === resumeId);
-      if (session) previousMessages = session.messages;
+  const handleConnect = async (
+    image: string | null = selectedImage, 
+    videoEl: HTMLVideoElement | null = null
+  ) => {
+    try {
+      const instruction = getLabSystemInstruction(profile);
+      
+      let previousMessages;
+      if (resumeId) {
+        const session = sessions.find(s => s.id === resumeId);
+        if (session) previousMessages = session.messages;
+      }
+      
+      console.log('[Lab] Connecting with instruction:', instruction.substring(0, 100) + '...');
+      await connect(instruction, previousMessages, image, videoEl);
+      console.log('[Lab] Connected successfully');
+    } catch (err: any) {
+      console.error('[Lab] Connection failed:', err);
+      setError(err.message || 'Failed to connect. Please try again.');
     }
-    connect(instruction, previousMessages, image, videoEl);
   };
 
   const handleEndSession = () => {
     stopVideo();
-    disconnect(); // triggers saveSession callback
+    disconnect();
     navigate(`/summary?sessionId=${sessionIdRef.current}&mode=lab`);
   };
 
   return (
     <div className="flex flex-col h-screen bg-[rgb(250,249,245)] text-zinc-900 overflow-hidden relative">
+      
+      {/* Error Display */}
+      {error && (
+        <div className="absolute top-4 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm font-medium shadow-md z-50 text-center">
+          {error}
+          <button 
+            onClick={() => setError(null)} 
+            className="ml-2 font-bold underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Camera Error */}
+      {cameraError && (
+        <div className="absolute top-4 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm font-medium shadow-md z-50 text-center">
+          {cameraError}
+        </div>
+      )}
 
       {/* Main Visual Area */}
       <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6">
-
+        
         {/* Video Feed */}
-        <div className={`absolute inset-0 transition-opacity duration-500 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
-        </div>
+        {isVideoActive && (
+          <div className="absolute inset-0">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+          </div>
+        )}
 
         {/* Selected Image */}
         {selectedImage && !isVideoActive && (
@@ -188,7 +256,7 @@ export default function LabEntry() {
           </div>
         )}
 
-        {/* AI Generated Image Overlay */}
+        {/* AI Generated Image */}
         {(currentImage || isGeneratingImage) && !isVideoActive && !selectedImage && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[rgb(250,249,245)] z-10 p-6">
             {isGeneratingImage ? (
@@ -208,19 +276,22 @@ export default function LabEntry() {
           </div>
         )}
 
-        {/* Default State / Avatar */}
+        {/* Default State / Mic Indicator */}
         {!isVideoActive && !selectedImage && !currentImage && !isGeneratingImage && (
           <div className="relative flex flex-col items-center justify-center z-10">
             {isConnected ? (
               <>
-                <div className="absolute w-48 h-48 bg-teal-500/10 rounded-full animate-ping" />
-                <div className="absolute w-64 h-64 bg-teal-500/5 rounded-full animate-pulse" />
+                <div className={`absolute w-48 h-48 rounded-full animate-ping ${isMuted ? 'bg-zinc-500/10' : 'bg-teal-500/10'}`} />
+                <div className={`absolute w-64 h-64 rounded-full animate-pulse ${isMuted ? 'bg-zinc-500/5' : 'bg-teal-500/5'}`} />
                 <div className={`relative z-10 w-32 h-32 rounded-full flex items-center justify-center shadow-2xl transition-colors ${isMuted ? 'bg-zinc-200 text-zinc-500 shadow-zinc-200/50' : 'bg-teal-500 text-white shadow-teal-500/50'}`}>
                   {isMuted ? <MicOff size={48} /> : <Mic size={48} />}
                 </div>
                 <p className="mt-8 text-xl font-bold text-zinc-900 tracking-wide">
                   {isMuted ? "Muted" : "I'm listening..."}
                 </p>
+                {isSilent && !isMuted && (
+                  <p className="mt-2 text-sm text-red-500 font-medium">Microphone is silent!</p>
+                )}
               </>
             ) : (
               <div className="flex flex-col items-center text-center px-6">
@@ -228,28 +299,18 @@ export default function LabEntry() {
                   <MicOff size={32} className="text-zinc-400" />
                 </div>
                 <h2 className="text-2xl font-bold text-zinc-900 mb-2">Lab Mode</h2>
-                <p className="text-zinc-500 max-w-[250px]">Tap the mic to talk, or use the camera to show me your experiment.</p>
+                <p className="text-zinc-500 max-w-[250px]">
+                  {isConnecting ? 'Connecting...' : 'Tap the mic to talk, or use the camera to show me your experiment.'}
+                </p>
               </div>
             )}
           </div>
         )}
 
-        {/* Camera Permission Error */}
-        {cameraError && (
-          <div className="absolute top-8 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm font-medium shadow-md z-20 text-center">
-            {cameraError}
-          </div>
-        )}
-
-        {/* Status Overlay */}
+        {/* Connecting Indicator */}
         {isConnecting && (
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-amber-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-md z-20 flex items-center gap-2">
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-amber-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-md z-20 flex items-center gap-2">
             <Loader2 size={16} className="animate-spin" /> Connecting...
-          </div>
-        )}
-        {isConnected && isSilent && !isMuted && (
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-md z-20 animate-pulse">
-            Microphone is silent!
           </div>
         )}
       </main>
@@ -291,12 +352,15 @@ export default function LabEntry() {
           {/* Mic Button */}
           <button
             onClick={handleMicClick}
+            disabled={isConnecting}
             className="flex flex-col items-center gap-2 group"
           >
-            <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 transition-all shadow-sm ${isConnected ? (isMuted ? 'bg-zinc-100 border-zinc-300 text-zinc-500' : 'bg-teal-500 border-teal-400 text-white shadow-teal-500/30 scale-110') : 'bg-zinc-50 border-zinc-200 text-zinc-600 group-hover:bg-zinc-100'}`}>
-              {isConnected && !isMuted ? <Mic size={28} /> : <MicOff size={28} />}
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 transition-all shadow-sm ${isConnected ? (isMuted ? 'bg-zinc-100 border-zinc-300 text-zinc-500' : 'bg-teal-500 border-teal-400 text-white shadow-teal-500/30 scale-110') : isConnecting ? 'bg-amber-50 border-amber-200 text-amber-600' : 'bg-zinc-50 border-zinc-200 text-zinc-600 group-hover:bg-zinc-100'}`}>
+              {isConnecting ? <Loader2 size={28} className="animate-spin" /> : isConnected && !isMuted ? <Mic size={28} /> : <MicOff size={28} />}
             </div>
-            <span className={`text-xs font-medium ${isConnected && !isMuted ? 'text-teal-600' : 'text-zinc-500'}`}>Mic</span>
+            <span className={`text-xs font-medium ${isConnected && !isMuted ? 'text-teal-600' : isConnecting ? 'text-amber-600' : 'text-zinc-500'}`}>
+              {isConnecting ? 'Connecting' : isConnected ? (isMuted ? 'Muted' : 'Listening') : 'Mic'}
+            </span>
           </button>
 
           {/* End Session Button */}
