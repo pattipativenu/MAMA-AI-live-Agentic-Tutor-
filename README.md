@@ -3,6 +3,17 @@
 
 # Mama AI: The Multimodal "Private Tutor"
 **Built for the Google Gemini Live Agent Challenge**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+![AI](https://img.shields.io/badge/AI-Gemini_Live_%2B_Gemini_3.1-0B57D0)
+![Image](https://img.shields.io/badge/Image-Nano_Banana_2_(Gemini_3.1_Flash_Image)-4C1)
+![Video](https://img.shields.io/badge/Video-Veo_3_(silent_9%3A16)-8A2BE2)
+![Framework](https://img.shields.io/badge/Framework-React_%2B_Vite-646CFF)
+![Language](https://img.shields.io/badge/Language-TypeScript-3178C6)
+![Backend](https://img.shields.io/badge/Backend-Firebase_(Auth%2FFirestore%2FStorage)-FFCA28)
+
+**Server URL (Cloud Run / deploy)**: `<SET_ME_AFTER_DEPLOY>`  
+**Local dev**: `http://localhost:3000`
 </div>
 
 ## 🌟 Overview
@@ -10,10 +21,92 @@ Mama AI is not a generic input, typing input, output text chatbot. It is a multi
 
 The application is built on a responsive, mobile-first React architecture, making it feel like a native app where the student's camera, microphone, and touchscreen are the primary input modalities.
 
+## 🗺️ System Diagram (Mermaid)
+
+```mermaid
+flowchart TB
+  User((Student))
+  MobileUI[MobileFirst_UI_React_Vite]
+  User --> MobileUI
+
+  subgraph Modes[Learning_Modes]
+    LabMode[Lab_Mode]
+    ExamMode[Exam_Mode]
+    TutorMode[Tutor_Mode]
+  end
+
+  MobileUI --> LabMode
+  MobileUI --> ExamMode
+  MobileUI --> TutorMode
+
+  subgraph Live[Realtime_Audio_%26_Vision_(Gemini_Live_API)]
+    useGeminiLive[useGeminiLive]
+    LiveModelLabExam["gemini-2.5-flash-native-audio-latest\n(Lab/Exam)"]
+    LiveModelTutor["gemini-2.5-flash-native-audio-preview-12-2025\n(Tutor)"]
+    Mic[Mic_Audio_PCM16_16kHz]
+    Cam[Camera_Frames_JPEG_1fps]
+    LiveOut[Audio_Out_PCM_24kHz\n+_Transcripts]
+  end
+
+  LabMode --> useGeminiLive
+  ExamMode --> useGeminiLive
+  TutorMode --> useGeminiLive
+
+  useGeminiLive --> LiveModelLabExam
+  useGeminiLive --> LiveModelTutor
+  Mic --> useGeminiLive
+  Cam --> useGeminiLive
+  useGeminiLive --> LiveOut
+
+  subgraph Tools[Live_Tools_%26_Media]
+    Whiteboard[Whiteboard_Tool_Calls\n(add_step/highlight/clear)]
+    ImgTool[generate_image]
+    VidTool[generate_video]
+    ImgGen["Image_Generation\n(gemini-3.1-flash-image-preview)"]
+    VidGen["Video_Generation\n(veo-3.0-generate-001,\n generateAudio=false,\n aspectRatio=9:16)"]
+  end
+
+  useGeminiLive --> Whiteboard
+  useGeminiLive --> ImgTool
+  useGeminiLive --> VidTool
+  ImgTool --> ImgGen
+  VidTool --> VidGen
+
+  subgraph Firebase[Firebase]
+    Auth[Auth]
+    Firestore[Firestore\nsessions/videoJobs/mediaCache]
+    Storage[Storage\ntextbooks/images/videos]
+  end
+
+  useGeminiLive --> Auth
+  useGeminiLive --> Firestore
+  ImgGen --> Storage
+  VidGen --> Storage
+  VidGen --> Firestore
+
+  subgraph Reasoning[Reasoning_%26_Text]
+    TutorText["TutorChat_Text\n(gemini-3.1-pro-preview)"]
+    Eval["useGeminiReasoning\n(gemini-3.1-pro-preview\nfallback gemini-3-pro-preview)"]
+    Cleanup["useSessions_cleanup\n(gemini-3.1-pro-preview)"]
+    TextbookParse["useTextbookParser\n(gemini-3.1-flash-lite-preview)"]
+    DiagramExtract["diagramExtractor\n(gemini-3.1-pro-preview\n+ text-embedding-004)"]
+  end
+
+  TutorMode --> TutorText
+  ExamMode --> Eval
+  LiveOut --> Cleanup
+  TutorMode --> TextbookParse
+  TutorMode --> DiagramExtract
+  TextbookParse --> Firestore
+  DiagramExtract --> Storage
+```
+
+```
+
 ## ✨ Core Features & Learning Modes
 
 ### 🔬 1. Lab Mode (Live Bidi-Streaming)
-This is the heart of the "Beyond Text" experience. Utilizing the **Gemini Multimodal Live API (`gemini-2.5-flash`)** via WebSockets, Lab Mode allows for natural, low-latency, bidirectional voice conversations.
+This is the heart of the "Beyond Text" experience. Utilizing the **Gemini Multimodal Live API (native audio)** via WebSockets, Lab Mode allows for natural, low-latency, bidirectional voice conversations.
 - **Barge-in Support:** Students can interrupt Mama AI mid-sentence if they don't understand something.
 - **Visual Context:** Students can toggle the camera to show Mama AI their physical homework, a science experiment array, or math equations on paper. The AI processes these video frames in real-time.
 - **Dynamic Visual & Video Aids:** If Mama AI needs to explain a geometric shape or a physics vector, she automatically triggers a `generate_image` tool call to draw a custom diagram. She can also utilize **Google Veo** to generate instructional video clips on the fly to visually demonstrate complex, moving scientific principles natively on the student's screen.
@@ -36,9 +129,10 @@ Mama AI dynamically adjusts her teaching style based on the student's profile.
 - **Styling:** Tailwind CSS (Vanilla CSS approach for custom animations)
 - **AI Integration:** 
   - `@google/genai` SDK
-  - Live API WebRTC (`gemini-2.5-flash`) for real-time voice and video.
-  - REST API (`gemini-3.1-pro` and `gemini-3.1-flash`) for complex reasoning and chunking.
-  - **Google Veo API** for on-the-fly instructional video generation.
+  - Live API (native audio) for real-time voice + vision frames.
+  - REST API (`gemini-3.1-pro-preview`) for reasoning and grounded tutoring.
+  - Image generation (`gemini-3.1-flash-image-preview`) for on-the-fly diagrams (9:16 portrait).
+  - Video generation (**Veo 3**, silent 9:16) for instructional animations.
 - **Backend / Database:** Google Firebase (Firestore, Storage, Auth)
 - **Document Parsing:** `pdfjs-dist` (PDFs) and `epubjs` (EPUBs)
 
