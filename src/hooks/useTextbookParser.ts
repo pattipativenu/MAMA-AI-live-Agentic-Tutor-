@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { doc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL, getBytes } from 'firebase/storage';
+import { doc, setDoc, getDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { storage, db } from '../firebase';
 
 export interface TextbookChapter {
@@ -10,8 +10,8 @@ export interface TextbookChapter {
     title: string;
     summary: string;
     subsections: { num: string; title: string }[]; // Authoritative list from TOC
-    storagePath: string;          // Firebase Storage path to chapter .txt
-    answersStoragePath?: string;  // Hidden answers path — injected into Gemini context only
+    storagePath?: string;         // Firebase Storage path to chapter .txt (legacy fallback)
+    answersStoragePath?: string;  // Hidden answers path (legacy fallback)
     subsectionRange?: string;     // e.g. "9.1–9.7" — displayed on the chapter card
 }
 
@@ -136,7 +136,7 @@ RAW TEXT:
 ${truncated}`;
 
             const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
+                model: 'gemini-3.1-flash-lite-preview',
                 contents: [{ role: 'user', parts: [{ text: promptText }] }],
                 config: {
                     responseMimeType: 'application/json',
@@ -175,39 +175,51 @@ ${truncated}`;
 
             const finalChaptersData = hasChapters ? preParsedChapters : parsed.chapters;
 
+            console.log('[useTextbookParser] hasChapters:', hasChapters);
+            console.log('[useTextbookParser] preParsedChapters count:', preParsedChapters?.length);
+            console.log('[useTextbookParser] parsed.chapters count:', parsed.chapters?.length);
+            console.log('[useTextbookParser] finalChaptersData count:', finalChaptersData?.length);
+
             if (!finalChaptersData || finalChaptersData.length === 0) {
+                console.error('[useTextbookParser] No chapters detected. hasChapters:', hasChapters);
+                console.error('[useTextbookParser] preParsedChapters:', preParsedChapters);
+                console.error('[useTextbookParser] parsed:', parsed);
                 throw new Error('No chapters detected. The file may not have a clear chapter structure.');
             }
+
+            console.log('[useTextbookParser] First chapter sample:', finalChaptersData[0]);
 
             const bookId = `book_${Date.now()}`;
             const chapters: TextbookChapter[] = [];
 
-            // Upload each chapter's content to Firebase Storage
+            // Save each chapter's full content to a Firestore subcollection
             for (let i = 0; i < finalChaptersData.length; i++) {
                 const ch = finalChaptersData[i];
                 setParseProgress(`Saving chapter ${i + 1} of ${finalChaptersData.length}...`);
-                const storagePath = `users/${userId}/books/${bookId}/chapter-${ch.index}.txt`;
-                const answersStoragePath = ch.answersContent
-                    ? `users/${userId}/books/${bookId}/answers-${ch.index}.txt`
-                    : undefined;
 
-                const storageRef = ref(storage, storagePath);
-                await uploadString(storageRef, ch.content);
+                // Save heavy content to subcollection
+                const chapterDocRef = doc(db, 'users', userId, 'textbooks', bookId, 'chapters', ch.index.toString());
+                const chapterPayload = {
+                    index: ch.index,
+                    realChapterNum: ch.realChapterNum || null,
+                    title: ch.title || '',
+                    summary: ch.summary || '',
+                    subsections: ch.subsections || [],
+                    content: ch.content || '',
+                    answersContent: ch.answersContent || null,
+                    subsectionRange: ch.subsectionRange || null,
+                };
+                await setDoc(chapterDocRef, chapterPayload);
 
-                if (answersStoragePath && ch.answersContent) {
-                    const answersRef = ref(storage, answersStoragePath);
-                    await uploadString(answersRef, ch.answersContent);
-                }
-
+                // Push clean metadata to the main textbook document array
                 chapters.push({
                     index: ch.index,
-                    realChapterNum: ch.realChapterNum,
-                    title: ch.title,
-                    summary: ch.summary,
+                    realChapterNum: ch.realChapterNum || null,
+                    title: ch.title || '',
+                    summary: ch.summary || '',
                     subsections: ch.subsections || [],
-                    storagePath,
-                    answersStoragePath,
-                    subsectionRange: ch.subsectionRange,
+                    subsectionRange: ch.subsectionRange || null,
+                    // No storage paths pushed for new logic
                 });
             }
 
@@ -241,21 +253,41 @@ ${truncated}`;
 
     /**
      * Fetch a single chapter's content from Firebase Storage.
+     * Uses Firebase SDK's getBytes which handles auth and CORS properly.
      */
     const fetchChapterContent = useCallback(async (
-        storagePath: string,
-        _bookId: string,
-        _chapterIndex: number,
+        storagePath: string | undefined,
+        bookId: string,
+        chapterIndex: number,
         userId?: string
     ): Promise<string> => {
-        if (!userId) {
-            console.error('[useTextbookParser] fetchChapterContent called without userId.');
-            return '';
+        if (!userId || !bookId) {
+            console.error('[useTextbookParser] fetchChapterContent called without valid IDs.');
+            throw new Error('Missing user ID or book ID');
         }
-        const storageRef = ref(storage, storagePath);
-        const url = await getDownloadURL(storageRef);
-        const res = await fetch(url);
-        return res.text();
+        try {
+            console.log(`[useTextbookParser] Fetching chapter ${chapterIndex} from Firestore...`);
+            const chapterRef = doc(db, 'users', userId, 'textbooks', bookId, 'chapters', chapterIndex.toString());
+            const chapterSnap = await getDoc(chapterRef);
+
+            if (chapterSnap.exists()) {
+                const data = chapterSnap.data();
+                console.log('[useTextbookParser] Fetched chapter from Firestore, length:', data.content?.length);
+                return data.content || '';
+            } else if (storagePath) {
+                // Fallback for older books that used Firebase Storage
+                console.log('[useTextbookParser] Chapter not in Firestore, falling back to storage:', storagePath);
+                const storageRef = ref(storage, storagePath);
+                const bytes = await getBytes(storageRef);
+                const text = new TextDecoder().decode(bytes);
+                console.log('[useTextbookParser] Fetched chapter from Storage, length:', text.length);
+                return text;
+            }
+            return '';
+        } catch (error: any) {
+            console.error('[useTextbookParser] Failed to fetch chapter:', error);
+            throw error;
+        }
     }, []);
 
     /**

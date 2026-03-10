@@ -1,11 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Book, Trash2, Loader2, ChevronRight, FileX } from 'lucide-react';
+import { Upload, Book, Trash2, Loader2, ChevronRight, FileX, FlaskConical, Atom, Calculator, Dna, Brain, Laptop, BookText } from 'lucide-react';
 import { useTextbookParser } from '../../hooks/useTextbookParser';
 import { extractTextFromPdf } from '../../utils/pdfExtractor';
 import { extractTextFromEpub } from '../../utils/epubExtractor';
 import { extractChaptersFromZip } from '../../utils/zipExtractor';
 import { useAuth } from '../../contexts/AuthContext';
+
+// Subject-specific icons
+const SUBJECT_ICONS: Record<string, React.ElementType> = {
+    'Chemistry': FlaskConical,
+    'Physics': Atom,
+    'Math': Calculator,
+    'Biology': Dna,
+    'Biotechnology': Brain,
+    'Computer Science': Laptop,
+    'Accountancy': BookText,
+    'default': Book,
+};
 
 export default function StudyLibrary() {
     const navigate = useNavigate();
@@ -57,14 +69,39 @@ export default function StudyLibrary() {
                 }));
             } else if (file.type === 'application/zip' || file.name.endsWith('.zip')) {
                 // Smart ZIP extraction: classifies chapters/answers/prelims automatically
+                console.log('[StudyLibrary] Starting ZIP extraction for:', file.name);
                 const extracted = await extractChaptersFromZip(file);
+                console.log('[StudyLibrary] ZIP extraction result:', {
+                    chapterCount: extracted.chapters?.length,
+                    bookTitleHint: extracted.bookTitleHint,
+                    gradeLevelHint: extracted.gradeLevelHint,
+                    diagramCount: extracted.diagramCount,
+                    textLength: extracted.text?.length
+                });
                 text = extracted.text;
                 preParsedChapters = extracted.chapters;
                 bookTitleHint = extracted.bookTitleHint || undefined;
                 const gradeLevelHintZip = extracted.gradeLevelHint || undefined;
+                
+                console.log('[StudyLibrary] Calling parseAndSave with:', {
+                    chaptersCount: preParsedChapters?.length,
+                    bookTitleHint,
+                    gradeLevelHint: gradeLevelHintZip
+                });
+                
                 // 2. Parse metadata and save to Storage/Firestore (pass hints from prelims)
-                const book = await parseAndSave(text, file.name, currentUser?.uid, preParsedChapters, bookTitleHint, gradeLevelHintZip);
-                if (book) { navigate(`/study/${book.id}`); } else { setUploadError('Failed to parse the textbook. Could not extract chapter structure.'); }
+                try {
+                    const book = await parseAndSave(text, file.name, currentUser?.uid, preParsedChapters, bookTitleHint, gradeLevelHintZip);
+                    if (book) { 
+                        navigate(`/study/${book.id}`); 
+                    } else { 
+                        console.error('[StudyLibrary] parseAndSave returned null');
+                        setUploadError('Failed to parse the textbook. The AI could not detect chapter boundaries. Check browser console for details.'); 
+                    }
+                } catch (parseError: any) {
+                    console.error('[StudyLibrary] parseAndSave threw error:', parseError);
+                    setUploadError(`Failed to parse: ${parseError.message || 'Unknown error'}`);
+                }
                 return; // early return — we already called parseAndSave
             } else {
                 // 1. Extract raw text client-side for single PDF
@@ -96,6 +133,19 @@ export default function StudyLibrary() {
             case 'biotechnology': return 'bg-teal-100 text-teal-700 border-teal-200';
             case 'computer science': return 'bg-purple-100 text-purple-700 border-purple-200';
             default: return 'bg-zinc-100 text-zinc-700 border-zinc-200';
+        }
+    };
+
+    const getSubjectAccent = (subject: string) => {
+        switch (subject.toLowerCase()) {
+            case 'physics': return { bubble: 'bg-blue-500/5 group-hover:bg-blue-500/10', hoverBorder: 'hover:border-blue-300' };
+            case 'chemistry': return { bubble: 'bg-emerald-500/5 group-hover:bg-emerald-500/10', hoverBorder: 'hover:border-emerald-300' };
+            case 'biology': return { bubble: 'bg-rose-500/5 group-hover:bg-rose-500/10', hoverBorder: 'hover:border-rose-300' };
+            case 'math': return { bubble: 'bg-indigo-500/5 group-hover:bg-indigo-500/10', hoverBorder: 'hover:border-indigo-300' };
+            case 'accountancy': return { bubble: 'bg-amber-500/5 group-hover:bg-amber-500/10', hoverBorder: 'hover:border-amber-300' };
+            case 'biotechnology': return { bubble: 'bg-teal-500/5 group-hover:bg-teal-500/10', hoverBorder: 'hover:border-teal-300' };
+            case 'computer science': return { bubble: 'bg-purple-500/5 group-hover:bg-purple-500/10', hoverBorder: 'hover:border-purple-300' };
+            default: return { bubble: 'bg-zinc-400/5 group-hover:bg-zinc-400/10', hoverBorder: 'hover:border-zinc-300' };
         }
     };
 
@@ -162,8 +212,11 @@ export default function StudyLibrary() {
                         <div
                             key={book.id}
                             onClick={() => navigate(`/study/${book.id}`)}
-                            className="bg-white rounded-3xl p-5 border border-zinc-200 shadow-sm hover:shadow-md transition-all cursor-pointer group flex items-center gap-4 relative overflow-hidden"
+                            className={`bg-white rounded-3xl p-5 border border-zinc-200 shadow-sm hover:shadow-md transition-all cursor-pointer group flex items-center gap-4 relative overflow-hidden ${getSubjectAccent(book.subject).hoverBorder}`}
                         >
+                            {/* Soft corner glow bubble */}
+                            <div className={`pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full ${getSubjectAccent(book.subject).bubble} group-hover:scale-110 transition-transform`} />
+
                             {/* Delete button (only visible on hover/focus) */}
                             <button
                                 onClick={(e) => {
@@ -179,7 +232,10 @@ export default function StudyLibrary() {
                             </button>
 
                             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border ${getSubjectColor(book.subject)}`}>
-                                <Book size={24} />
+                                {(() => {
+                                    const IconComponent = SUBJECT_ICONS[book.subject] || SUBJECT_ICONS['default'];
+                                    return <IconComponent size={24} />;
+                                })()}
                             </div>
 
                             <div className="flex-1 min-w-0 pr-8">
@@ -196,9 +252,9 @@ export default function StudyLibrary() {
                                         <p className="text-sm font-semibold text-amber-600 mt-0.5">{part}</p>
                                     ) : null;
                                 })()}
-                                {/* Grade + chapters */}
+                                {/* Grade + chapters/units */}
                                 <p className="text-xs font-medium text-zinc-400 mt-1">
-                                    {book.gradeLevel} &bull; {book.numChapters} Chapters
+                                    {book.gradeLevel} &bull; {book.numChapters} {book.subject === 'Chemistry' || book.subject === 'Biotechnology' ? 'Units' : 'Chapters'}
                                 </p>
                             </div>
 

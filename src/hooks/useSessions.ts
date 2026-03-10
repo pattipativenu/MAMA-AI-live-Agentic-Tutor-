@@ -16,6 +16,7 @@ export interface SessionMessage {
   role: 'user' | 'ai';
   text: string;
   image?: string;
+  video?: string;
 }
 
 export interface ConceptHook {
@@ -41,7 +42,7 @@ export interface GenerationJob {
 export interface SavedSession {
   id: string;
   date: number;
-  mode: 'lab' | 'exam';
+  mode: 'lab' | 'exam' | 'tutor';
   summary: string;
   messages: SessionMessage[];
   evaluation?: SessionEvaluation;
@@ -68,29 +69,50 @@ export function useSessions() {
    *                   omitted a new timestamp-based ID is used.
    */
   const saveSession = async (
-    mode: 'lab' | 'exam',
+    mode: 'lab' | 'exam' | 'tutor',
     rawMessages: SessionMessage[],
     sessionId?: string,
     evaluation?: SessionEvaluation
   ): Promise<string> => {
+    console.log('[useSessions] saveSession called with', rawMessages.length, 'messages, mode:', mode);
     const validMessages = rawMessages.filter(m => m.text.trim() !== '' || m.image);
+    console.log('[useSessions] Valid messages after filter:', validMessages.length);
     const id = sessionId ?? Date.now().toString();
 
     let finalMessages = [...validMessages];
     let summary = 'Session on ' + new Date().toLocaleDateString();
 
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    // Save immediately with raw messages (don't wait for AI cleaning)
+    const immediateSession: SavedSession = {
+      id,
+      date: Date.now(),
+      mode,
+      summary: validMessages.length > 0 
+        ? (validMessages[0].text.slice(0, 50) + (validMessages[0].text.length > 50 ? '...' : ''))
+        : 'Study Session',
+      messages: validMessages,
+      ...(evaluation ? { evaluation } : {}),
+    };
+
+    // Save immediately so user sees session in history right away
+    if (currentUser) {
+      console.log('[useSessions] Saving immediate session:', id);
+      await saveSessionToDb(currentUser.uid, immediateSession);
+    }
+
+    // Then try to clean with AI (optional enhancement)
     if (apiKey && validMessages.length > 0) {
       try {
         const ai = new GoogleGenAI({ apiKey });
         const transcript = validMessages.map(m => `${m.role}: ${m.text}`).join('\n');
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: `You are an editor. I will give you a raw, messy voice transcript between a 'user' and an 'ai'.
+          model: 'gemini-3.1-pro-preview',
+          contents: `You are an editor. I will give you a raw voice transcript between a 'user' and an 'ai'.
 1. Fix any small grammar errors or speech-to-text glitches.
 2. Structure it properly so it's easy to read.
-3. Generate a short 3-5 word summary title for the session.
+3. Generate a short 3-5 word summary title.
 
 Transcript:
 ${transcript}`,
@@ -105,7 +127,7 @@ ${transcript}`,
                   items: {
                     type: Type.OBJECT,
                     properties: {
-                      role: { type: Type.STRING, description: "'user' or 'ai'" },
+                      role: { type: Type.STRING },
                       text: { type: Type.STRING },
                     },
                     required: ['role', 'text'],
@@ -149,7 +171,11 @@ ${transcript}`,
     };
 
     if (currentUser) {
+      console.log('[useSessions] Saving to Firestore for user:', currentUser.uid);
       await saveSessionToDb(currentUser.uid, newSession);
+      console.log('[useSessions] Session saved successfully:', id);
+    } else {
+      console.warn('[useSessions] No current user, session not saved');
     }
 
     return id;

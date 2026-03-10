@@ -1,22 +1,45 @@
+/**
+ * videoGen.ts — Educational video generation with caching integration
+ * 
+ * Uses Veo 3 (veo-3.0-generate-001) for 8-second silent diagram/equation animations
+ * Integrates with mediaCache.ts for per-user topic-based caching
+ * 
+ * Key Features:
+ * - 9:16 portrait aspect ratio (mobile-optimized)
+ * - Silent animations (no audio; Gemini narrates via Live API)
+ * - 8-second duration
+ * - Automatic caching
+ * - Firestore-based async job management
+ */
+
 import { GoogleGenAI } from '@google/genai';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../firebase';
-import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection, query, where, orderBy, getDocs, Unsubscribe } from 'firebase/firestore';
+import { storage, db } from '../firebase';
+import { 
+  checkMediaCache, 
+  storeMediaInCache, 
+  shouldSkipAutoGeneration,
+  CachedMedia 
+} from './mediaCache';
 
-// Initialize the SDK using the Vite environment variable
+// Initialize the SDK
 const ai = new GoogleGenAI({
   apiKey: import.meta.env.VITE_GEMINI_API_KEY
 });
 
+// Veo 3 model for silent 2D/3D diagram animations (Gemini narrates via Live API)
+const VEO_MODEL = 'veo-3.0-generate-001';
+
 export interface VideoGenerationOptions {
   age?: string;
-  theme?: string;
-  aspectRatio?: '16:9' | '9:16'; // 9:16 for mobile portrait
+  theme?: 'realistic' | 'space' | 'anime' | 'historical' | 'action';
+  aspectRatio?: '16:9' | '9:16';
   resolution?: '720p' | '1080p';
+  personGeneration?: 'DONT_ALLOW' | 'ALLOW_ADULT';
 }
 
-// ── Per-theme aesthetic finishing ────────────────────────────────────────────
+// ── Theme aesthetics for Veo 2 ───────────────────────────────────────────────
 
 const VIDEO_THEME_AESTHETICS: Record<string, string> = {
   realistic:
@@ -31,26 +54,21 @@ const VIDEO_THEME_AESTHETICS: Record<string, string> = {
     'High-contrast comic-book aesthetic. Bold thick outlines, explosive speed lines, impact-star bursts, and dramatic directional lighting that screams kinetic energy.',
 };
 
-// ── Prompt builder (Veo guide: 5-part formula, 100–150 words, 8-second map) ──
+// ── Prompt builder (Veo 2 optimized) ─────────────────────────────────────────
 
 /**
- * Builds a Veo-optimised video prompt following the official prompting guide:
- *  1. Shot Composition  — camera angle, distance, movement
- *  2. Subject Details   — scientific accuracy, colour, texture
- *  3. Action Sequence   — explicit 8-second play-by-play
- *  4. Setting           — minimal, contextual, never distracting
- *  5. Aesthetics & Mood — colour grade, theme style, satisfying resolution
- *
- * Target length: ~100–150 words.
- * No dialogue, no voiceover, no text overlays.
+ * Builds a Veo-2-optimised video prompt following best practices:
+ * - 100–150 words
+ * - 5-part formula: Shot, Subject, Action, Setting, Aesthetics
+ * - 8-second timeline mapping (0-2s, 2-6s, 6-8s)
+ * - No dialogue, no text overlays
  */
-function buildVideoPrompt(concept: string, age: string, theme?: string): string {
+function buildVideoPrompt(concept: string, age: string = '', theme: string = 'realistic'): string {
   const audienceNote = age
     ? `Calibrated for a ${age} student — visually engaging and clear without being oversimplified.`
     : 'Visually clear and appropriately detailed for high-school students.';
 
-  const aesthetic =
-    (theme && VIDEO_THEME_AESTHETICS[theme]) ?? VIDEO_THEME_AESTHETICS.realistic;
+  const aesthetic = VIDEO_THEME_AESTHETICS[theme] ?? VIDEO_THEME_AESTHETICS.realistic;
 
   return `
 An 8-second silent educational animation demonstrating: "${concept}".
@@ -69,106 +87,314 @@ CRITICAL: No dialogue. No voiceover. No text overlays. No captions. Silent visua
   `.trim();
 }
 
+export interface VideoJob {
+  id: string;
+  userId: string;
+  sessionId: string;
+  concept: string;
+  topicName?: string;
+  chapterId?: string;
+  status: 'pending' | 'checking_cache' | 'generating' | 'uploading' | 'completed' | 'failed' | 'skipped';
+  videoUrl?: string;
+  cached?: boolean;
+  storagePath?: string;
+  error?: string;
+  skipReason?: string;
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+}
+
+// ── Main video generation function ───────────────────────────────────────────
+
 /**
- * Generates video using Veo 3 (video-only — no native audio track).
- * NOTE: This is an async operation that requires polling.
- * Returns Firebase Storage URL when complete.
+ * Generates video using Veo 2 with caching integration
+ * 
+ * Flow:
+ * 1. Check cache first (return cached if hit)
+ * 2. Check if should skip (short concepts, chapter titles)
+ * 3. Generate using Veo 2
+ * 4. Upload to Cloud Storage
+ * 5. Store in cache
+ * 6. Return URL
+ * 
+ * This is a synchronous function that takes 30-60 seconds.
+ * For async usage, use startVideoGenerationJob() with Firestore polling.
  */
 export async function generateEducationalVideo(
   concept: string,
   userId: string,
   sessionId: string,
   options: VideoGenerationOptions = {}
-): Promise<string> {
+): Promise<{ url: string; cached: boolean; storagePath: string }> {
   const {
     age = '',
     theme = 'realistic',
-    aspectRatio = '9:16', // Mobile portrait for Mama AI
+    aspectRatio = '9:16',
+    personGeneration = 'ALLOW_ADULT'
   } = options;
 
+  // Check cache first
+  const cached = await checkMediaCache(userId, concept, undefined, 'video');
+  if (cached) {
+    console.log(`[VideoGen] Cache hit for: ${concept}`);
+    return {
+      url: cached.mediaUrl,
+      cached: true,
+      storagePath: cached.storagePath
+    };
+  }
+
   const prompt = buildVideoPrompt(concept, age, theme);
-  console.log(`[VideoGen] Starting Veo generation for: ${concept}`);
+  console.log(`[VideoGen] Starting Veo 3 generation for: ${concept}`);
+  console.log(`[VideoGen] Prompt length: ${prompt.length} chars`);
 
-  // Start video generation — veo-3-generate produces video without native audio
-  const operation = await ai.models.generateVideos({
-    model: 'veo-3-generate',
-    prompt,
-    config: {
-      aspectRatio,
-      personGeneration: 'ALLOW_ADULT'
+  try {
+    // Start video generation with Veo 3 (silent; Gemini narrates via Live API)
+    const operation = await ai.models.generateVideos({
+      model: VEO_MODEL,
+      prompt,
+      config: {
+        aspectRatio,
+        personGeneration,
+        generateAudio: false
+      }
+    });
+
+    // Poll for completion
+    let completedOperation = operation;
+    console.log(`[VideoGen] Polling operation: ${operation.name}`);
+    
+    let pollCount = 0;
+    const maxPolls = 30; // 5 minutes max (10s * 30)
+    
+    while (!completedOperation.done && pollCount < maxPolls) {
+      await new Promise(resolve => setTimeout(resolve, 10000)); // 10 second intervals
+      
+      completedOperation = (await ai.operations.getVideosOperation({
+        operation: completedOperation as any
+      })) as typeof operation;
+      
+      pollCount++;
+      console.log(`[VideoGen] Poll ${pollCount}, done: ${completedOperation.done}`);
     }
-  });
 
-  // Poll for completion (this takes 30-60 seconds typically)
-  let completedOperation = operation;
-  console.log(`[VideoGen] Polling operation: ${operation.name}`);
-  while (!completedOperation.done) {
-    await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
-    // According to JS docs: await ai.operations.getVideosOperation({ operation });
-    completedOperation = (await ai.operations.getVideosOperation({
-      operation: completedOperation as any
-    })) as typeof operation;
+    if (!completedOperation.done) {
+      throw new Error('Video generation timed out after 5 minutes');
+    }
+
+    // Extract video
+    const generatedVideo = completedOperation.response?.generatedVideos?.[0];
+    if (!generatedVideo?.video?.uri) {
+      throw new Error('Video generation failed - no video URI in response');
+    }
+
+    console.log(`[VideoGen] Video ready, downloading from: ${generatedVideo.video.uri}`);
+
+    // Download video (URI may require API key for Google API URLs)
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const videoUri = generatedVideo.video.uri;
+    const downloadUrlWithKey = videoUri.includes('generativelanguage.googleapis.com') && apiKey
+      ? `${videoUri}${videoUri.includes('?') ? '&' : '?'}key=${apiKey}`
+      : videoUri;
+    const videoResponse = await fetch(downloadUrlWithKey);
+    if (!videoResponse.ok) {
+      throw new Error(`Failed to download video: ${videoResponse.statusText}`);
+    }
+    
+    const videoBlob = await videoResponse.blob();
+    console.log(`[VideoGen] Downloaded ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+
+    // Upload to Firebase Storage
+    const timestamp = Date.now();
+    const storagePath = `users/${userId}/generated/videos/${timestamp}.mp4`;
+    const videoRef = ref(storage, storagePath);
+    
+    await uploadBytes(videoRef, videoBlob, {
+      contentType: 'video/mp4',
+      customMetadata: {
+        concept: concept.substring(0, 100),
+        userId,
+        sessionId
+      }
+    });
+    
+    const downloadUrl = await getDownloadURL(videoRef);
+    console.log(`[VideoGen] Uploaded to: ${downloadUrl}`);
+
+    // Store in cache
+    await storeMediaInCache(
+      userId,
+      concept,
+      concept,
+      'video',
+      downloadUrl,
+      storagePath,
+      prompt
+    );
+
+    return {
+      url: downloadUrl,
+      cached: false,
+      storagePath
+    };
+
+  } catch (error) {
+    console.error('[VideoGen] Generation failed:', error);
+    throw error;
   }
-
-  // Get the video data
-  const generatedVideo = completedOperation.response?.generatedVideos?.[0];
-  if (!generatedVideo?.video?.uri) {
-    throw new Error('Video generation failed - no video URI in response');
-  }
-
-  console.log(`[VideoGen] Download video from URI: ${generatedVideo.video.uri}`);
-
-  // Download video bytes by fetching the URI directly (Google GenAI URI)
-  const videoResponse = await fetch(generatedVideo.video.uri);
-  if (!videoResponse.ok) {
-    throw new Error(`Failed to download video from URI: ${videoResponse.statusText}`);
-  }
-  const videoBlob = await videoResponse.blob();
-
-  // Upload to Firebase Storage for permanent storage
-  const videoRef = ref(storage, `users/${userId}/sessions/${sessionId}/videos/${Date.now()}.mp4`);
-  await uploadBytes(videoRef, videoBlob);
-  const downloadUrl = await getDownloadURL(videoRef);
-
-  console.log(`[VideoGen] Video uploaded to storage: ${downloadUrl}`);
-  return downloadUrl;
 }
 
+// ── Firestore-based async job management ─────────────────────────────────────
+
 /**
- * Firestore-based polling version for Generation Queue
- * This version updates Firestore status and can be polled by the UI
+ * Start an async video generation job with Firestore tracking
+ * Use this for "fire and forget" pattern where AI continues speaking
+ * 
+ * @param legacySlideId - Deprecated, kept for backward compatibility
  */
 export async function startVideoGenerationJob(
   concept: string,
   userId: string,
   sessionId: string,
-  slideId: string,
-  options: VideoGenerationOptions = {}
-): Promise<void> {
-  const jobRef = doc(db, 'users', userId, 'sessions', sessionId, 'videoJobs', slideId);
+  legacySlideId?: string,
+  options: VideoGenerationOptions & { topicName?: string; chapterId?: string } = {}
+): Promise<string> {
+  // Handle both old and new signatures
+  const actualOptions = typeof legacySlideId === 'object' ? legacySlideId : options;
+  const { topicName, chapterId, ...videoOptions } = actualOptions;
+  const jobId = legacySlideId && typeof legacySlideId === 'string' 
+    ? legacySlideId 
+    : `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  const jobRef = doc(db, 'videoJobs', jobId);
+  
+  // Create job document
+  await setDoc(jobRef, {
+    id: jobId,
+    userId,
+    sessionId,
+    concept,
+    topicName: topicName || concept,
+    chapterId,
+    status: 'pending',
+    createdAt: Date.now()
+  } as VideoJob);
 
+  // Start generation in background
+  (async () => {
+    try {
+      // Check if should skip
+      const skipCheck = await shouldSkipAutoGeneration(userId, concept, chapterId);
+      if (skipCheck.skip) {
+        await setDoc(jobRef, {
+          status: 'skipped',
+          skipReason: skipCheck.reason,
+          completedAt: Date.now()
+        }, { merge: true });
+        console.log(`[VideoGen] Job ${jobId} skipped: ${skipCheck.reason}`);
+        return;
+      }
+
+      // Check cache
+      await setDoc(jobRef, { status: 'checking_cache' }, { merge: true });
+      
+      if (skipCheck.cached) {
+        await setDoc(jobRef, {
+          status: 'completed',
+          videoUrl: skipCheck.cached.mediaUrl,
+          cached: true,
+          completedAt: Date.now()
+        }, { merge: true });
+        console.log(`[VideoGen] Job ${jobId} completed from cache`);
+        return;
+      }
+
+      // Generate
+      await setDoc(jobRef, { status: 'generating', startedAt: Date.now() }, { merge: true });
+      
+      const result = await generateEducationalVideo(concept, userId, sessionId, videoOptions);
+      
+      // Update with result
+      await setDoc(jobRef, {
+        status: 'completed',
+        videoUrl: result.url,
+        cached: result.cached,
+        storagePath: result.storagePath,
+        completedAt: Date.now()
+      }, { merge: true });
+      
+      console.log(`[VideoGen] Job ${jobId} completed successfully`);
+      
+    } catch (error) {
+      console.error(`[VideoGen] Job ${jobId} failed:`, error);
+      await setDoc(jobRef, {
+        status: 'failed',
+        error: (error as Error).message,
+        completedAt: Date.now()
+      }, { merge: true });
+    }
+  })();
+
+  return jobId;
+}
+
+/**
+ * Subscribe to video job updates (real-time)
+ * Use this in UI to show "video ready" when generation completes
+ */
+export function subscribeToVideoJobs(
+  userId: string,
+  sessionId: string,
+  onUpdate: (jobs: VideoJob[]) => void
+): Unsubscribe {
+  const jobsRef = collection(db, 'videoJobs');
+  const q = query(
+    jobsRef,
+    where('userId', '==', userId),
+    where('sessionId', '==', sessionId),
+    orderBy('createdAt', 'desc')
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const jobs = snapshot.docs.map(doc => doc.data() as VideoJob);
+    console.log(`[VideoGen] Jobs updated: ${jobs.length} jobs`);
+    onUpdate(jobs);
+  }, (error) => {
+    console.error('[VideoGen] Subscription error:', error);
+  });
+}
+
+/**
+ * Get all completed videos for a session
+ */
+export async function getSessionVideos(userId: string, sessionId: string): Promise<VideoJob[]> {
   try {
-    await setDoc(jobRef, {
-      status: 'generating',
-      concept,
-      startedAt: Date.now()
-    });
-
-    const videoUrl = await generateEducationalVideo(concept, userId, sessionId, options);
-
-    await setDoc(jobRef, {
-      status: 'complete',
-      videoUrl,
-      completedAt: Date.now()
-    }, { merge: true });
-
+    const jobsRef = collection(db, 'videoJobs');
+    const q = query(
+      jobsRef,
+      where('userId', '==', userId),
+      where('sessionId', '==', sessionId),
+      where('status', '==', 'completed'),
+      orderBy('completedAt', 'desc')
+    );
+    
+    const snap = await getDocs(q);
+    return snap.docs.map(doc => doc.data() as VideoJob);
   } catch (error) {
-    console.error(`[VideoGen] Job failed for concept: ${concept}`, error);
-    await setDoc(jobRef, {
-      status: 'failed',
-      error: (error as Error).message,
-      failedAt: Date.now()
-    }, { merge: true });
-    throw error;
+    console.error('[VideoGen] Error getting session videos:', error);
+    return [];
   }
+}
+
+/**
+ * Quick check if a topic has a cached video
+ */
+export async function getCachedVideoUrl(
+  userId: string,
+  topicName: string,
+  chapterId?: string
+): Promise<string | null> {
+  const cached = await checkMediaCache(userId, topicName, chapterId, 'video');
+  return cached?.mediaUrl || null;
 }

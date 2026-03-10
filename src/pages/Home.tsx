@@ -1,29 +1,95 @@
-import { Beaker, BookOpen, Star, Microscope, Pencil, Clock, ChevronRight } from 'lucide-react';
+import { useEffect } from 'react';
+import {
+  Beaker,
+  BookOpen,
+  Star,
+  Microscope,
+  Pencil,
+  Clock,
+  ChevronRight,
+  Loader2,
+  FlaskConical,
+  Atom,
+  Calculator,
+  Dna,
+  Brain,
+  Laptop,
+  BookText,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSessions } from '../hooks/useSessions';
+import { useTextbookParser } from '../hooks/useTextbookParser';
 
 export default function Home() {
   const navigate = useNavigate();
-  const { userProfile } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const { sessions } = useSessions();
+  const { textbooks, isLoadingBooks, loadTextbooks } = useTextbookParser();
+
+  useEffect(() => {
+    loadTextbooks(currentUser?.uid);
+  }, [loadTextbooks, currentUser?.uid]);
+
+  const getSubjectColor = (subject: string) => {
+    switch (subject.toLowerCase()) {
+      case 'physics':
+        return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'chemistry':
+        return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+      case 'biology':
+        return 'bg-rose-100 text-rose-700 border-rose-200';
+      case 'math':
+        return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+      case 'accountancy':
+        return 'bg-amber-100 text-amber-700 border-amber-200';
+      case 'biotechnology':
+        return 'bg-teal-100 text-teal-700 border-teal-200';
+      case 'computer science':
+        return 'bg-purple-100 text-purple-700 border-purple-200';
+      default:
+        return 'bg-zinc-100 text-zinc-700 border-zinc-200';
+    }
+  };
+
+  const getSubjectAccent = (subject: string) => {
+    switch (subject.toLowerCase()) {
+      case 'physics':
+        return { bubble: 'bg-blue-500/5 group-hover:bg-blue-500/10', hoverBorder: 'hover:border-blue-300' };
+      case 'chemistry':
+        return { bubble: 'bg-emerald-500/5 group-hover:bg-emerald-500/10', hoverBorder: 'hover:border-emerald-300' };
+      case 'biology':
+        return { bubble: 'bg-rose-500/5 group-hover:bg-rose-500/10', hoverBorder: 'hover:border-rose-300' };
+      case 'math':
+        return { bubble: 'bg-indigo-500/5 group-hover:bg-indigo-500/10', hoverBorder: 'hover:border-indigo-300' };
+      case 'accountancy':
+        return { bubble: 'bg-amber-500/5 group-hover:bg-amber-500/10', hoverBorder: 'hover:border-amber-300' };
+      case 'biotechnology':
+        return { bubble: 'bg-teal-500/5 group-hover:bg-teal-500/10', hoverBorder: 'hover:border-teal-300' };
+      case 'computer science':
+        return { bubble: 'bg-purple-500/5 group-hover:bg-purple-500/10', hoverBorder: 'hover:border-purple-300' };
+      default:
+        return { bubble: 'bg-zinc-400/5 group-hover:bg-zinc-400/10', hoverBorder: 'hover:border-zinc-300' };
+    }
+  };
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    let name = 'Student';
+    let name = 'friend';
     if (userProfile?.name) {
       const rawName = userProfile.name.trim();
       if (rawName) {
         name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
       }
     }
-    
+
+    // Time-of-day bands with more personal, motivational copy
     if (hour >= 22 || hour < 4) {
-      return { line1: "Burning the midnight oil,", line2: `${name}!` };
+      return { line1: "Late night legends club,", line2: `${name}.` };
     } else if (hour >= 4 && hour < 12) {
-      return { line1: "You're unstoppable,", line2: `${name}!` };
+      return { line1: "Morning brain switched on,", line2: `${name}!` };
     } else if (hour >= 12 && hour < 17) {
-      return { line1: "Keep the momentum,", line2: `${name}!` };
+      return { line1: "Your future self is proud,", line2: `${name}.` };
     } else {
       return { line1: "Great work today,", line2: `${name}!` };
     }
@@ -83,6 +149,95 @@ export default function Home() {
           </div>
         </button>
       </div>
+
+      {/* Books & Subjects */}
+      <section className="mt-2">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-zinc-900 tracking-tight">Books &amp; Subjects</h2>
+          <button
+            onClick={() => navigate('/study')}
+            className="text-sm font-bold text-amber-600 hover:text-amber-700 flex items-center gap-1"
+          >
+            View All <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {isLoadingBooks ? (
+          <div className="bg-white border border-zinc-200/60 rounded-[32px] p-8 flex items-center justify-center shadow-sm">
+            <Loader2 className="animate-spin text-zinc-400" size={24} />
+          </div>
+        ) : textbooks.length === 0 ? (
+          <div className="bg-white border border-zinc-200/60 rounded-[32px] p-6 shadow-sm flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-zinc-50 rounded-2xl flex items-center justify-center">
+                <BookOpen className="text-zinc-300" size={22} />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-zinc-900">No books in your library yet</p>
+                <p className="text-xs text-zinc-500 font-medium mt-1">
+                  Upload a textbook from the Study tab to see it here.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-4 overflow-x-auto pb-2 -mx-6 px-6 scrollbar-hide">
+            {textbooks.slice(0, 6).map((book) => {
+              const SubjectIcon =
+                book.subject === 'Chemistry'
+                  ? FlaskConical
+                  : book.subject === 'Physics'
+                  ? Atom
+                  : book.subject === 'Math'
+                  ? Calculator
+                  : book.subject === 'Biology'
+                  ? Dna
+                  : book.subject === 'Biotechnology'
+                  ? Brain
+                  : book.subject === 'Computer Science'
+                  ? Laptop
+                  : book.subject === 'Accountancy'
+                  ? BookText
+                  : BookOpen;
+
+              const part = book.title.replace(book.subject, '').trim();
+              const accent = getSubjectAccent(book.subject);
+
+              return (
+                <button
+                  key={book.id}
+                  onClick={() => navigate(`/study/${book.id}`)}
+                  className={`relative overflow-hidden group min-w-[260px] max-w-[260px] bg-white rounded-3xl p-5 border border-zinc-200 shadow-sm hover:shadow-md transition-all text-left flex items-center gap-4 ${accent.hoverBorder}`}
+                >
+                  {/* Soft corner glow bubble */}
+                  <div className={`pointer-events-none absolute -top-8 -right-8 w-28 h-28 rounded-full ${accent.bubble} group-hover:scale-110 transition-transform`} />
+
+                  <div
+                    className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border ${getSubjectColor(
+                      book.subject
+                    )}`}
+                  >
+                    <SubjectIcon size={24} />
+                  </div>
+
+                  <div className="flex-1 min-w-0 pr-4">
+                    <h3 className="font-bold text-zinc-900 text-base truncate">{book.subject}</h3>
+                    {part && (
+                      <p className="text-xs font-semibold text-amber-600 mt-0.5 truncate">{part}</p>
+                    )}
+                    <p className="text-[11px] font-medium text-zinc-400 mt-1">
+                      {book.gradeLevel} &bull; {book.numChapters}{' '}
+                      {book.subject === 'Chemistry' || book.subject === 'Biotechnology' ? 'Units' : 'Chapters'}
+                    </p>
+                  </div>
+
+                  <ChevronRight className="text-zinc-300 shrink-0" size={20} />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* Recent Sessions */}
       <section className="mt-4">
