@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, ChevronRight, Hash, FlaskConical, Atom, Calculator
 import { useTextbookParser } from '../../hooks/useTextbookParser';
 import { useAuth } from '../../contexts/AuthContext';
 
+
 // Subject-specific icons and labels
 const SUBJECT_CONFIG: Record<string, { icon: any; label: string; color: string }> = {
     'Chemistry': { icon: FlaskConical, label: 'Unit', color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
@@ -95,21 +96,23 @@ export default function StudyDetail() {
                     {book?.chapters.map((chapter) => (
                         <button
                             key={chapter.index}
-                            onClick={() => navigate(`/study/${book.id}/${chapter.index}`)}
+                            onClick={() => {
+                                navigate(`/study/${book.id}/${chapter.index}`);
+                            }}
                             className="bg-white rounded-3xl p-5 border border-zinc-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all text-left flex gap-4 items-center group"
                         >
                             {/* Chapter number bubble */}
                             <div className="w-12 h-12 bg-zinc-50 rounded-2xl border border-zinc-100 flex items-center justify-center shrink-0 group-hover:bg-amber-50 transition-colors">
                                 <div className="flex items-center text-zinc-400 font-bold text-xl">
                                     <Hash size={16} strokeWidth={3} className="mr-0.5 opacity-50" />
-                                    <span className="group-hover:text-amber-600">{chapter.index}</span>
+                                    <span className="group-hover:text-amber-600">{chapter.realChapterNum || chapter.index}</span>
                                 </div>
                             </div>
 
                             <div className="flex-1 min-w-0 pr-4">
                                 {/* Bold section label heading */}
                                 <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600 mb-0.5">
-                                    {sectionLabel} {chapter.index}
+                                    {sectionLabel} {chapter.realChapterNum || chapter.index}
                                 </p>
                                 {/* Section name — strip 'Chapter N:' or 'Unit N:' prefix if present */}
                                 <h3 className="font-bold text-zinc-900 group-hover:text-amber-800 transition-colors line-clamp-2 leading-snug text-sm">

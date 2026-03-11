@@ -162,7 +162,7 @@ function extractBookInfo(rawText: string): { title: string; gradeLevel: string }
  *
  * Strategy:
  *  1. Fix split chars across the full text
- *  2. Find all "CHAPTER [ORDINAL] [TITLE]" entries
+ *  2. Find all "CHAPTER [ORDINAL] [TITLE]" entries OR numbered entries like "1. Title"
  *  3. Detect which PART the ZIP belongs to by looking at chapter number ranges
  *     in both Part I and Part II TOC sections of the prelims
  */
@@ -170,9 +170,11 @@ function extractTocChapters(rawText: string): Array<{ num: number; title: string
     const text = fixSplitChars(rawText);
     const chapters: Array<{ num: number; title: string }> = [];
 
-    // Match "CHAPTER NINE RAY OPTICS AND OPTICAL INSTRUMENTS" (title ends at page number)
-    // Pattern: CHAPTER [WORD_OR_NUM] [TITLE_WORDS] [optional: page_number]
-    const chapterRegex = /CHAPTER\s+([A-Z]+|\d+)\s+([A-Z][A-Z\s\-&,()]+?)(?=\s+\d[\d.]*\s|\s+CHAPTER\s|\s+APPENDIX|\s+ANSWERS|\s+BIBLIOGRAPHY|$)/gi;
+    // First try: Match "CHAPTER NINE RAY OPTICS AND OPTICAL INSTRUMENTS" or "UNIT ONE SOLID STATE"
+    // Pattern: (CHAPTER|UNIT) [WORD_OR_NUM] [TITLE_WORDS] [optional: page_number]
+    // Character class includes colons, semicolons, apostrophes, slashes, dots for titles like
+    // "SEMICONDUCTOR ELECTRONICS: MATERIALS, DEVICES AND SIMPLE CIRCUITS"
+    const chapterRegex = /(?:CHAPTER|UNIT)\s+([A-Z]+|\d+)\s+([A-Z][A-Z\s\-&,():;'/.]+?)(?=\s+\d[\d.]*\s*|\s+CHAPTER\s|\s+UNIT\s|\s+APPENDIX|\s+ANSWERS|\s+BIBLIOGRAPHY|$)/gi;
 
     let match;
     while ((match = chapterRegex.exec(text)) !== null) {
@@ -199,6 +201,48 @@ function extractTocChapters(rawText: string): Array<{ num: number; title: string
         const finalTitle = title.charAt(0).toUpperCase() + title.slice(1);
 
         chapters.push({ num, title: finalTitle });
+    }
+
+    // If no chapters found with CHAPTER/UNIT pattern, try math book format:
+    // "1. Relations and Functions" or "1 Relations and Functions"
+    // This handles math textbooks where chapters are just numbered without "Chapter" prefix
+    if (chapters.length === 0) {
+        // Match lines like "1. Relations and Functions" or "1 Relations and Functions"
+        // The title should be Title Case (not ALL CAPS like physics chapter titles)
+        // and should NOT look like subsections (e.g., not "1.1 Introduction")
+        const mathChapterRegex = /^(\d{1,2})[.\s]\s*([A-Z][a-zA-Z\s\-&,():;'/.]+?)(?=\s+\d{1,3}\s*$|$)/gm;
+        
+        while ((match = mathChapterRegex.exec(text)) !== null) {
+            const num = parseInt(match[1], 10);
+            const titleRaw = match[2].trim();
+            
+            // Skip if this looks like a subsection (contains pattern like "1.1", "2.3" etc.)
+            if (/^\d+\.\d+/.test(titleRaw)) continue;
+            
+            // Skip if title is too short or too long
+            if (titleRaw.length < 3 || titleRaw.length > 100) continue;
+            
+            // Skip common non-chapter entries
+            const lowerTitle = titleRaw.toLowerCase();
+            if (JUNK_KEYWORDS.some(kw => lowerTitle.includes(kw))) continue;
+            
+            // Clean title: Title Case, collapse extra spaces
+            const title = titleRaw
+                .replace(/\s+/g, ' ')
+                .split(' ')
+                .map(w => {
+                    const lower = w.toLowerCase();
+                    // Keep short conjunctions lowercase unless first word
+                    if (['and', 'of', 'the', 'in', 'for', 'a', 'an', 'by', 'to'].includes(lower)) return lower;
+                    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+                })
+                .join(' ');
+
+            // Capitalise first letter regardless
+            const finalTitle = title.charAt(0).toUpperCase() + title.slice(1);
+            
+            chapters.push({ num, title: finalTitle });
+        }
     }
 
     return chapters;

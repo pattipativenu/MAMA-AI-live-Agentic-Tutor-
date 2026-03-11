@@ -7,7 +7,9 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   // Hide the bottom nav on full-screen mode pages (Lab/Exam active sessions)
-  const isFullScreen = location.pathname.includes('/lab/entry') || location.pathname.includes('/exam/entry');
+  const isFullScreen =
+    location.pathname.includes('/lab/entry') ||
+    location.pathname.includes('/exam/entry');
 
   const navItems = [
     { path: '/', label: 'Home', icon: Home },
