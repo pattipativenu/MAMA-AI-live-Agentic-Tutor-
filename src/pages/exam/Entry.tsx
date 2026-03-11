@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Mic, MicOff, Image as ImageIcon, Loader2, Camera, X, ArrowRight, Lightbulb, PlayCircle,
+  Mic, MicOff, Image as ImageIcon, Loader2, Camera, X, ArrowRight, Lightbulb, PlayCircle, ChevronLeft,
 } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
+import { WhiteboardView } from '../../components/whiteboard';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSessions, SessionMessage } from '../../hooks/useSessions';
@@ -35,7 +36,12 @@ export const getExamSystemInstruction = (profile: UserProfile | null, context?: 
     if (profile.age) profileContext += `Age/Grade: ${profile.age}\n`;
     if (profile.gender) profileContext += `Gender: ${profile.gender}\n`;
     if (profile.hobbies?.length > 0) profileContext += `Favourite Activities/Hobbies: ${profile.hobbies.join(', ')}\n`;
-    if (profile.learningStyle) profileContext += `Preferred Learning Style: ${profile.learningStyle}\n`;
+    if (profile.learningStyle) {
+      const styleLabel = profile.learningStyle === 'all'
+        ? 'Adaptive — use whatever style works best for each concept (visual, auditory, kinesthetic, hands-on)'
+        : profile.learningStyle;
+      profileContext += `Preferred Learning Style: ${styleLabel}\n`;
+    }
     profileContext += `DO NOT ask the student for this information again — you already know it. Tailor all your questions, examples, and image generation prompts specifically to their age, gender, and favourite activities.\n`;
   }
 
@@ -61,12 +67,18 @@ CRITICAL EXAM RULES:
 
 4. CORRECT & EXPLAIN: When correcting, ALWAYS start with a simple, relatable real-world example tailored to their interests or hobbies BEFORE introducing the formal scientific language or formula. This anchors the concept in something they already understand.
 
-5. VISUAL AIDS (CRITICAL): When explaining or correcting any concept that involves shape, motion, forces, chemistry, or geometry, you MUST use the \`generate_image\` tool.
+5. VISUAL AIDS (PERMISSION-GATED): Before calling generate_image, ALWAYS ask the student first — e.g. "Do you want me to create an image so you can understand this visually?" or "Want me to draw a diagram of this?" Only call generate_image after the student gives a positive response ("yes", "please", "sure", "go ahead", etc.). Once granted:
+   - Generate 2–4 connected images for the topic (overview, close-up, real-world, optional comparison) — each with a DIFFERENT perspective. Do NOT generate the same image twice.
    - Tailor visual complexity to their age: young students get simple, fun diagrams; Class 11/12 students get advanced formulas, vectors, or graphs.
    - NEVER include the text "Class X" or the student's grade level in the image prompt itself.
-   - Always tell the student: "I'm generating a visual to help you see this more clearly."
+   IMAGE SERIES RULE: Call generate_image 2–4 times in sequence: Call 1 — Overview/big-picture, Call 2 — Close-up/detail, Call 3 — Real-world application, Call 4 (optional) — Comparison/process.
 
-6. QUIZ & VERIFY: After every explanation or correction, ask a short follow-up question to confirm understanding. If the student answers incorrectly again, gently point out what they got right, where they went wrong, and walk through it once more.
+6. VIDEO (PERMISSION-GATED): Before calling generate_video, ALWAYS ask the student first — e.g. "Do you want me to create a video animation so you can understand this better?" or "Want me to animate this for you?" Only call generate_video after the student gives a positive response. Once granted, generate ONE video. Only generate a second if the student explicitly asks again.
+
+7. WHITEBOARD (PERMISSION-GATED): When a student has a repeated question, makes a mistake, or asks for a deeper explanation involving formulas, equations, geometry, or step-by-step derivations — ASK FIRST: "Do you want me to explain this on the whiteboard?" or "Can I pull up the whiteboard to walk you through this?" Only call add_whiteboard_step after the student says yes. Build ONE step at a time. Pause between steps to ask a check question. Call clear_whiteboard when moving to a new problem.
+   WHITEBOARD + MEDIA: After the student has approved image generation, you may use show_media(-1) mid-whiteboard to show the visual briefly, then call hide_media() to return to the board.
+
+8. QUIZ & VERIFY: After every explanation or correction, ask a short follow-up question to confirm understanding. If the student answers incorrectly again, gently point out what they got right, where they went wrong, and walk through it once more.
 
 CRITICAL SAFETY RULE:
 If you ask the student to demonstrate a concept physically, you MUST specify safe, non-harmful objects (e.g. paper, a feather, a soft pillow). NEVER suggest heavy, sharp, or breakable objects (glass, phones, scissors, hard plastics). Their physical safety is your responsibility.
@@ -111,6 +123,8 @@ export default function ExamEntry() {
   const {
     isConnected, isConnecting, isSilent, isMuted,
     messages, currentImage, isGeneratingImage,
+    whiteboardState, completeWhiteboardStep,
+    isMediaFocused, hideMedia,
     connect, disconnect, toggleMute, sendClientMessage,
     startVideoCapture, stopVideoCapture,
   } = useGeminiLive('exam', (msgs) => {
@@ -535,7 +549,18 @@ Then wait for the user to respond before continuing.`;
           </div>
         )}
 
-        {(currentImage || isGeneratingImage) && !selectedImage && (
+        {/* PRIORITY 1: Whiteboard (hidden when show_media is active) */}
+        {(whiteboardState.isActive || whiteboardState.steps.length > 0) && !isMediaFocused && !selectedImage && (
+          <div className="absolute inset-0 z-20 bg-white">
+            <WhiteboardView
+              whiteboardState={whiteboardState}
+              onStepComplete={completeWhiteboardStep}
+            />
+          </div>
+        )}
+
+        {/* PRIORITY 2: Generated image / show_media focus */}
+        {(currentImage || isGeneratingImage) && !selectedImage && (isMediaFocused || !(whiteboardState.isActive || whiteboardState.steps.length > 0)) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[rgb(250,249,245)] z-10 p-6">
             {isGeneratingImage ? (
               <div className="flex flex-col items-center gap-4 text-amber-600">
@@ -545,7 +570,15 @@ Then wait for the user to respond before continuing.`;
             ) : currentImage ? (
               <div className="relative w-full max-w-md aspect-square rounded-3xl overflow-hidden shadow-xl border border-zinc-200">
                 <img src={currentImage} alt="AI Generated" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-zinc-200 shadow-sm">
+                {isMediaFocused && whiteboardState.steps.length > 0 && (
+                  <button
+                    onClick={hideMedia}
+                    className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-amber-700 border border-amber-200 shadow-sm"
+                  >
+                    <ChevronLeft size={14} /> Back to Whiteboard
+                  </button>
+                )}
+                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-zinc-200 shadow-sm">
                   <ImageIcon size={14} className="text-amber-600" />
                   <span className="text-xs font-bold text-zinc-800 uppercase tracking-wider">Visual Aid</span>
                 </div>
@@ -554,7 +587,7 @@ Then wait for the user to respond before continuing.`;
           </div>
         )}
 
-        {!selectedImage && !currentImage && !isGeneratingImage && (
+        {!selectedImage && !currentImage && !isGeneratingImage && !(whiteboardState.isActive || whiteboardState.steps.length > 0) && (
           <div className="relative flex flex-col items-center justify-center z-10">
             {isConnected ? (
               <>
