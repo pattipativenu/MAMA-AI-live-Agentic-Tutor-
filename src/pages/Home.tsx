@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Beaker,
   BookOpen,
@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSessions } from '../hooks/useSessions';
 import { useTextbookParser } from '../hooks/useTextbookParser';
+import { cleanSessionSummary, MarkdownText } from '../utils/markdown';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -73,8 +74,7 @@ export default function Home() {
     }
   };
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
+  const getDisplayName = () => {
     let name = 'friend';
     if (userProfile?.name) {
       const rawName = userProfile.name.trim();
@@ -82,39 +82,69 @@ export default function Home() {
         name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
       }
     }
+    return name;
+  };
 
-    // Time-of-day bands with more personal, motivational copy
+  const getGreeting = (variant: number, name: string) => {
+    const hour = new Date().getHours();
+
+    // Two variants per time-of-day band for light rotation
     if (hour >= 22 || hour < 4) {
-      return { line1: "Late night legends club,", line2: `${name}.` };
+      // Late night
+      return variant === 0
+        ? { before: 'Late night legends club, ', after: '.' }
+        : { before: 'Midnight genius mode activated, ', after: '.' };
     } else if (hour >= 4 && hour < 12) {
-      return { line1: "Morning brain switched on,", line2: `${name}!` };
+      // Morning
+      return variant === 0
+        ? { before: 'Good morning, ', after: '! Brain switched on.' }
+        : { before: 'Morning, ', after: '! Let’s wake those neurons up.' };
     } else if (hour >= 12 && hour < 17) {
-      return { line1: "Your future self is proud,", line2: `${name}.` };
+      // Afternoon
+      return variant === 0
+        ? { before: '', after: ', your afternoon brain is in focus mode.' }
+        : { before: 'Good afternoon, ', after: ' — your future self is proud.' };
     } else {
-      return { line1: "Great work today,", line2: `${name}!` };
+      // Evening
+      return variant === 0
+        ? { before: 'Nice work today, ', after: '! Ready for one more push?' }
+        : { before: 'Evening, ', after: '. Let’s wrap the day strong.' };
     }
   };
 
-  const greeting = getGreeting();
-  const initial = userProfile?.name ? userProfile.name.trim().charAt(0).toUpperCase() : 'S';
+  // Rotate between variant 0 and 1 on each visit/refresh of the dashboard
+  const [greetingVariant, setGreetingVariant] = useState<number>(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem('mamaaiGreetingVariant');
+      const previous = stored === '1' ? 1 : 0;
+      const next = previous === 0 ? 1 : 0;
+      setGreetingVariant(next);
+      window.localStorage.setItem('mamaaiGreetingVariant', String(next));
+    } catch {
+      // If localStorage is unavailable, just default to variant 0
+      setGreetingVariant(0);
+    }
+  }, []);
+
+  const displayName = getDisplayName();
+  const greeting = getGreeting(greetingVariant, displayName);
 
   return (
     <div className="flex flex-col gap-8 p-6 pt-12">
       
       {/* Header */}
-      <header className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold text-zinc-900 leading-tight tracking-tight">
-            {greeting.line1}<br />{greeting.line2}
-          </h1>
-          <p className="text-zinc-500 mt-2 text-sm font-medium">What are we learning today?</p>
-        </div>
-        <button 
-          onClick={() => navigate('/settings')}
-          className="w-12 h-12 rounded-full bg-amber-500 flex items-center justify-center text-amber-950 font-bold text-xl shrink-0 shadow-lg shadow-amber-500/20 hover:scale-105 transition-transform active:scale-95"
-        >
-          {initial}
-        </button>
+      <header className="flex flex-col gap-3 items-start text-left">
+        <h1 className="text-3xl font-bold text-zinc-900 leading-tight tracking-tight">
+          {greeting.before}
+          <span className="text-amber-500 font-semibold tracking-tight font-kavoon">
+            {displayName}
+          </span>
+          {greeting.after}
+        </h1>
+        <p className="text-zinc-500 mt-2 text-sm font-medium">What are we learning today?</p>
       </header>
 
       {/* Mode Cards */}
@@ -276,7 +306,9 @@ export default function Home() {
                     {session.mode} Mode
                   </span>
                 </div>
-                <h3 className="font-bold text-zinc-900 text-lg line-clamp-2 tracking-tight flex-1">{session.summary}</h3>
+                <h3 className="font-bold text-zinc-900 text-lg line-clamp-2 tracking-tight flex-1">
+                  <MarkdownText text={cleanSessionSummary(session.summary)} />
+                </h3>
                 <p className="text-[10px] text-zinc-400 mt-4 uppercase tracking-widest font-semibold">
                   {new Date(session.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                 </p>

@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mic, MicOff, Camera, X, Video, VideoOff, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
-import { useSessions } from '../../hooks/useSessions';
+import { useSessions, SessionMessage } from '../../hooks/useSessions';
+import { playModeEntrySound } from '../../utils/sound';
 
 // Simple system instruction that works even without profile
 const getLabSystemInstruction = (profile: UserProfile | null) => {
@@ -58,9 +59,15 @@ export default function LabEntry() {
     isConnected, isConnecting, isSilent, isMuted,
     currentImage, isGeneratingImage,
     connect, disconnect, toggleMute,
+    startVideoCapture, stopVideoCapture,
   } = useGeminiLive('lab', (msgs) => {
     saveSession('lab', msgs, sessionIdRef.current);
   });
+
+  // Play notification sound on mount
+  useEffect(() => {
+    playModeEntrySound();
+  }, []);
 
   // Auto-connect mic on mount
   useEffect(() => {
@@ -83,6 +90,7 @@ export default function LabEntry() {
   }, []);
 
   const stopVideo = () => {
+    stopVideoCapture();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
@@ -94,20 +102,40 @@ export default function LabEntry() {
     setCameraError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 15 }
+        }
       });
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        const videoElement = videoRef.current;
+        videoElement.srcObject = stream;
+        const playVideo = () => {
+          videoElement.play().catch(err => {
+            console.warn('[Lab] video.play() failed:', err);
+            setCameraError('Camera started but video could not be displayed. Click the page and toggle the camera again.');
+          });
+        };
+        if ('onloadedmetadata' in videoElement) {
+          videoElement.onloadedmetadata = playVideo;
+        } else {
+          playVideo();
+        }
+        console.log('[Lab] Camera stream attached to video element');
       }
       streamRef.current = stream;
       setIsVideoActive(true);
       setSelectedImage(null);
-      
-      // Auto-connect when video starts
-      await handleConnect(null, videoRef.current);
+
+      // If already connected, start sending frames directly; otherwise connect fresh with video
+      if (isConnected) {
+        if (videoRef.current) startVideoCapture(videoRef.current);
+      } else {
+        await handleConnect(null, videoRef.current);
+      }
     } catch (err: any) {
       console.error("[Lab] Failed to start video:", err);
-      
       // Provide user-friendly error messages
       let errorMessage = 'Could not access camera';
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -122,12 +150,28 @@ export default function LabEntry() {
         try {
           const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
           if (videoRef.current) {
-            videoRef.current.srcObject = fallbackStream;
+            const videoElement = videoRef.current;
+            videoElement.srcObject = fallbackStream;
+            const playVideo = () => {
+              videoElement.play().catch(playErr => {
+                console.warn('[Lab] fallback video.play() failed:', playErr);
+                setCameraError('Fallback camera started but video could not be displayed. Click the page and toggle the camera again.');
+              });
+            };
+            if ('onloadedmetadata' in videoElement) {
+              videoElement.onloadedmetadata = playVideo;
+            } else {
+              playVideo();
+            }
           }
           streamRef.current = fallbackStream;
           setIsVideoActive(true);
           setSelectedImage(null);
-          await handleConnect(null, videoRef.current);
+          if (isConnected) {
+            if (videoRef.current) startVideoCapture(videoRef.current);
+          } else {
+            await handleConnect(null, videoRef.current);
+          }
           setCameraError(null);
           return;
         } catch (fallbackErr) {
@@ -175,12 +219,34 @@ export default function LabEntry() {
     videoEl: HTMLVideoElement | null = null
   ) => {
     try {
-      const instruction = getLabSystemInstruction(profile);
+      let instruction = getLabSystemInstruction(profile);
+      let previousMessages: SessionMessage[] | undefined;
       
-      let previousMessages;
+      // Handle resume flow
       if (resumeId) {
         const session = sessions.find(s => s.id === resumeId);
-        if (session) previousMessages = session.messages;
+        if (session && session.messages.length > 0) {
+          previousMessages = session.messages;
+          
+          // Add resume-specific instruction with recap prompt
+          const lastMessages = session.messages.slice(-3);
+          const lastTopic = session.summary || 'this experiment';
+          
+          instruction += `
+
+--- RESUME CONTEXT ---
+The user is resuming a previous lab session. Here is what you discussed before:
+
+Session Summary: ${lastTopic}
+
+Recent conversation:
+${lastMessages.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
+
+IMPORTANT: When you start speaking, begin with a warm recap like:
+"Okay, in our previous lab session on ${lastTopic}, here's where we stopped: [brief summary of last discussion]. Do you want me to continue from there, or do you have anything else in mind?"
+
+Then wait for the user to respond before continuing.`;
+        }
       }
       
       console.log('[Lab] Connecting with instruction:', instruction.substring(0, 100) + '...');
@@ -224,18 +290,16 @@ export default function LabEntry() {
       {/* Main Visual Area */}
       <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6">
         
-        {/* Video Feed */}
-        {isVideoActive && (
-          <div className="absolute inset-0">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          </div>
-        )}
+        {/* Video Feed — always in DOM so videoRef is valid when startVideo() sets srcObject */}
+        <div className={`absolute inset-0 transition-opacity duration-300 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover"
+          />
+        </div>
 
         {/* Selected Image */}
         {selectedImage && !isVideoActive && (

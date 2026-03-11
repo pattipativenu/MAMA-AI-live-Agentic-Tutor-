@@ -1,6 +1,10 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Kavoon&display=swap');
 
 @layer utilities {
+  .font-kavoon {
+    font-family: 'Kavoon', system-ui, -apple-system, 'system-ui', sans-serif;
+  }
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }

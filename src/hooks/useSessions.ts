@@ -1,22 +1,40 @@
 /**
  * useSessions.ts — Firestore-backed session store.
- * Zero localStorage. Uses onSnapshot for real-time sync.
- * Imported by: ExamEntry, LabEntry, Summary, TutorChat, Sessions page.
+ * 
+ * Key behaviors:
+ * - Saves EXACT speech-to-text (no AI cleaning/modification)
+ * - Filters out system/internal messages
+ * - Only saves sessions with actual user communication
+ * - Generates smart headings using Gemini 3
+ * - Deduplicates sessions
  */
-import { useState, useEffect } from 'react';
-import { GoogleGenAI, Type } from '@google/genai';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   subscribeToSessions,
   saveSessionToDb,
+  deleteSessionFromDb,
 } from '../services/dataStore';
 import { CarouselSlide } from './useCarousel';
+import { 
+  generateSessionHeading, 
+  filterSystemMessages, 
+  hasUserCommunication,
+  countMedia,
+  hasWhiteboardUsage,
+} from '../services/sessionHeading';
 
 export interface SessionMessage {
-  role: 'user' | 'ai';
+  role: 'user' | 'ai' | 'system';
   text: string;
   image?: string;
   video?: string;
+  timestamp?: number;
+  whiteboardStep?: {
+    math: string;
+    explanation: string;
+  };
+  isSystemMessage?: boolean;
 }
 
 export interface ConceptHook {
@@ -44,7 +62,11 @@ export interface SavedSession {
   date: number;
   mode: 'lab' | 'exam' | 'tutor';
   summary: string;
+  topic?: string;
   messages: SessionMessage[];
+  hasUserCommunication: boolean;
+  whiteboardUsed?: boolean;
+  mediaCount: number;
   evaluation?: SessionEvaluation;
   generationJob?: GenerationJob;
 }
@@ -52,6 +74,7 @@ export interface SavedSession {
 export function useSessions() {
   const { currentUser } = useAuth();
   const [sessions, setSessions] = useState<SavedSession[]>([]);
+  const recentSessionIdsRef = useRef<Set<string>>(new Set());
 
   // Real-time Firestore subscription — refreshes automatically on any write
   useEffect(() => {
@@ -59,121 +82,140 @@ export function useSessions() {
       setSessions([]);
       return;
     }
-    const unsubscribe = subscribeToSessions(currentUser.uid, setSessions);
+    
+    const unsubscribe = subscribeToSessions(currentUser.uid, (allSessions) => {
+      // Filter: Only show sessions with user communication
+      const validSessions = allSessions.filter(s => s.hasUserCommunication !== false);
+      
+      // Sort by date (newest first)
+      validSessions.sort((a, b) => b.date - a.date);
+      
+      // Deduplicate by content similarity
+      const dedupedSessions = deduplicateSessions(validSessions);
+      
+      console.log('[useSessions] Sessions updated:', dedupedSessions.length, 'sessions');
+      setSessions(dedupedSessions);
+      
+      // Track recent IDs for duplicate detection during save
+      recentSessionIdsRef.current = new Set(dedupedSessions.slice(0, 10).map(s => s.id));
+    });
+    
     return () => unsubscribe();
   }, [currentUser]);
 
   /**
-   * Clean up the raw transcript with Gemini flash, then persist to Firestore.
-   * @param sessionId  Pre-generated stable ID (from ExamEntry / LabEntry). If
-   *                   omitted a new timestamp-based ID is used.
+   * Deduplicate sessions based on mode + first user message similarity
+   */
+  const deduplicateSessions = (sessionList: SavedSession[]): SavedSession[] => {
+    const seen = new Map<string, SavedSession>();
+    
+    for (const session of sessionList) {
+      const firstUserMsg = session.messages.find(m => m.role === 'user')?.text || '';
+      const key = `${session.mode}-${firstUserMsg.slice(0, 100)}`;
+      
+      if (!seen.has(key)) {
+        seen.set(key, session);
+      } else {
+        // Keep the one with more messages (more complete session)
+        const existing = seen.get(key)!;
+        if (session.messages.length > existing.messages.length) {
+          seen.set(key, session);
+        }
+      }
+    }
+    
+    return Array.from(seen.values());
+  };
+
+  /**
+   * Check if this would be a duplicate of a recent session
+   */
+  const isDuplicateSession = (
+    mode: 'lab' | 'exam' | 'tutor',
+    messages: SessionMessage[]
+  ): boolean => {
+    const firstUserMsg = messages.find(m => m.role === 'user')?.text || '';
+    if (!firstUserMsg) return false;
+    
+    const key = `${mode}-${firstUserMsg.slice(0, 100)}`;
+    
+    for (const session of sessions.slice(0, 5)) {
+      const sessionFirstMsg = session.messages.find(m => m.role === 'user')?.text || '';
+      if (`${session.mode}-${sessionFirstMsg.slice(0, 100)}` === key) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  /**
+   * Save a session with exact speech-to-text, proper filtering, and smart heading
    */
   const saveSession = async (
     mode: 'lab' | 'exam' | 'tutor',
     rawMessages: SessionMessage[],
     sessionId?: string,
     evaluation?: SessionEvaluation
-  ): Promise<string> => {
+  ): Promise<string | null> => {
     console.log('[useSessions] saveSession called with', rawMessages.length, 'messages, mode:', mode);
-    const validMessages = rawMessages.filter(m => m.text.trim() !== '' || m.image);
-    console.log('[useSessions] Valid messages after filter:', validMessages.length);
+    
+    // Add timestamps to messages that don't have them
+    const now = Date.now();
+    const messagesWithTimestamps = rawMessages.map((m, idx) => ({
+      ...m,
+      timestamp: m.timestamp || now - (rawMessages.length - idx) * 1000,
+    }));
+    
+    // Filter out system/internal messages
+    const filteredMessages = filterSystemMessages(messagesWithTimestamps);
+    console.log('[useSessions] Messages after filtering:', filteredMessages.length);
+    
+    // Check if there's actual user communication
+    const hasCommunication = hasUserCommunication(filteredMessages);
+    if (!hasCommunication) {
+      console.log('[useSessions] No user communication found, not saving session');
+      return null;
+    }
+    
+    // Check for duplicates
+    if (isDuplicateSession(mode, filteredMessages)) {
+      console.log('[useSessions] Duplicate session detected, not saving');
+      return null;
+    }
+    
     const id = sessionId ?? Date.now().toString();
-
-    let finalMessages = [...validMessages];
-    let summary = 'Session on ' + new Date().toLocaleDateString();
-
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    // Save immediately with raw messages (don't wait for AI cleaning)
-    const immediateSession: SavedSession = {
+    
+    // Count media
+    const mediaCount = countMedia(filteredMessages);
+    
+    // Check whiteboard usage
+    const whiteboardUsed = hasWhiteboardUsage(filteredMessages);
+    
+    // Generate initial placeholder summary
+    const firstUserText = filteredMessages.find(m => m.role === 'user')?.text || '';
+    let summary = firstUserText.slice(0, 60) + (firstUserText.length > 60 ? '...' : '');
+    
+    // Create session object
+    const session: SavedSession = {
       id,
-      date: Date.now(),
-      mode,
-      summary: validMessages.length > 0 
-        ? (validMessages[0].text.slice(0, 50) + (validMessages[0].text.length > 50 ? '...' : ''))
-        : 'Study Session',
-      messages: validMessages,
-      ...(evaluation ? { evaluation } : {}),
-    };
-
-    // Save immediately so user sees session in history right away
-    if (currentUser) {
-      console.log('[useSessions] Saving immediate session:', id);
-      await saveSessionToDb(currentUser.uid, immediateSession);
-    }
-
-    // Then try to clean with AI (optional enhancement)
-    if (apiKey && validMessages.length > 0) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const transcript = validMessages.map(m => `${m.role}: ${m.text}`).join('\n');
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
-          contents: `You are an editor. I will give you a raw voice transcript between a 'user' and an 'ai'.
-1. Fix any small grammar errors or speech-to-text glitches.
-2. Structure it properly so it's easy to read.
-3. Generate a short 3-5 word summary title.
-
-Transcript:
-${transcript}`,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                summary: { type: Type.STRING },
-                messages: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      role: { type: Type.STRING },
-                      text: { type: Type.STRING },
-                    },
-                    required: ['role', 'text'],
-                  },
-                },
-              },
-              required: ['summary', 'messages'],
-            },
-          },
-        });
-
-        const cleaned = JSON.parse(response.text || '{}');
-        if (cleaned.summary && cleaned.messages) {
-          summary = cleaned.summary;
-
-          // Merge AI-generated images back (Gemini transcript cleanup strips them)
-          const originalAiImgs = validMessages.filter(m => m.role === 'ai' && m.image);
-          const cleanAiMsgs = cleaned.messages.filter((m: any) => m.role === 'ai');
-
-          finalMessages = cleaned.messages.map((cleanMsg: any) => {
-            let image: string | undefined;
-            if (cleanMsg.role === 'ai') {
-              const aiIdx = cleanAiMsgs.indexOf(cleanMsg);
-              if (originalAiImgs[aiIdx]) image = originalAiImgs[aiIdx].image;
-            }
-            return { role: cleanMsg.role as 'user' | 'ai', text: cleanMsg.text, image };
-          });
-        }
-      } catch (e) {
-        console.error('[useSessions] Failed to clean transcript:', e);
-      }
-    }
-
-    const newSession: SavedSession = {
-      id,
-      date: Date.now(),
+      date: now,
       mode,
       summary,
-      messages: finalMessages,
+      messages: filteredMessages,
+      hasUserCommunication: true,
+      whiteboardUsed,
+      mediaCount,
       ...(evaluation ? { evaluation } : {}),
     };
 
+    // Save to Firestore
     if (currentUser) {
-      console.log('[useSessions] Saving to Firestore for user:', currentUser.uid);
-      await saveSessionToDb(currentUser.uid, newSession);
-      console.log('[useSessions] Session saved successfully:', id);
+      console.log('[useSessions] Saving session:', id);
+      await saveSessionToDb(currentUser.uid, session);
+      
+      // Generate smart heading asynchronously (don't block)
+      generateSmartHeading(currentUser.uid, session);
     } else {
       console.warn('[useSessions] No current user, session not saved');
     }
@@ -181,5 +223,47 @@ ${transcript}`,
     return id;
   };
 
-  return { sessions, saveSession };
+  /**
+   * Generate and update smart heading using Gemini 3
+   */
+  const generateSmartHeading = async (uid: string, session: SavedSession) => {
+    try {
+      const result = await generateSessionHeading(session.mode, session.messages);
+      
+      const updatedSession: SavedSession = {
+        ...session,
+        summary: result.heading,
+        topic: result.topic,
+      };
+      
+      await saveSessionToDb(uid, updatedSession);
+      console.log('[useSessions] Updated heading:', result.heading);
+    } catch (error) {
+      console.error('[useSessions] Failed to generate heading:', error);
+    }
+  };
+
+  /**
+   * Delete a session
+   */
+  const deleteSession = async (sessionId: string): Promise<void> => {
+    if (!currentUser) {
+      console.warn('[useSessions] No current user, cannot delete');
+      return;
+    }
+    
+    try {
+      await deleteSessionFromDb(currentUser.uid, sessionId);
+      console.log('[useSessions] Deleted session:', sessionId);
+    } catch (error) {
+      console.error('[useSessions] Failed to delete session:', error);
+      throw error;
+    }
+  };
+
+  return { 
+    sessions, 
+    saveSession, 
+    deleteSession,
+  };
 }

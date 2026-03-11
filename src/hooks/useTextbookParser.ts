@@ -291,13 +291,23 @@ ${truncated}`;
     }, []);
 
     /**
-     * Delete a textbook and its Firestore metadata record.
-     * (Firebase Storage files are cleaned up via a Cloud Function or separately.)
+     * Delete a textbook, its chapters subcollection, and Firestore metadata.
+     * Firestore does NOT cascade deletes, so we must manually delete the
+     * `chapters/` subcollection docs before removing the parent document.
      */
     const deleteTextbook = useCallback(async (bookId: string, userId?: string) => {
         if (!userId) return;
         try {
+            // 1. Delete all chapter docs in the subcollection first
+            const chaptersCol = collection(db, 'users', userId, 'textbooks', bookId, 'chapters');
+            const chaptersSnap = await getDocs(chaptersCol);
+            const deletePromises = chaptersSnap.docs.map(d => deleteDoc(d.ref));
+            await Promise.all(deletePromises);
+            console.log(`[useTextbookParser] Deleted ${chaptersSnap.size} chapter docs for book ${bookId}`);
+
+            // 2. Then delete the parent textbook document
             await deleteDoc(doc(db, 'users', userId, 'textbooks', bookId));
+            console.log(`[useTextbookParser] Deleted textbook document ${bookId}`);
         } catch (e) {
             console.error('[useTextbookParser] Firestore delete error:', e);
         }

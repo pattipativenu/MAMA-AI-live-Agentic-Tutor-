@@ -271,19 +271,21 @@ export default function TutorChat() {
     }, []);
 
     // Voice mode with selected voice from profile
-    const { 
-        isConnected, 
-        isConnecting, 
-        isMuted, 
+    const {
+        isConnected,
+        isConnecting,
+        isMuted,
         statusDisplay,
         currentImage,
         generatedMedia,
         isGeneratingImage,
         whiteboardState,
-        connect, 
-        disconnect, 
+        connect,
+        disconnect,
         toggleMute,
         sendClientMessage,
+        startVideoCapture,
+        stopVideoCapture,
         completeWhiteboardStep,
     } = useGeminiLive(
         'tutor',
@@ -308,11 +310,6 @@ export default function TutorChat() {
     // Camera state
     const [cameraImage, setCameraImage] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-
-    // Play notification sound on mount
-    useEffect(() => {
-        playModeEntrySound();
-    }, []);
 
     // Book data
     useEffect(() => {
@@ -548,17 +545,14 @@ ${answersContent}
     // Update connection when toggling camera during voice session
     const handleVideoToggleDuringVoice = async () => {
         if (isVideoActive) {
-            // Turning off
+            // Stop stream and frame capture without touching the Live API connection
             stopVideo();
         } else {
-            // Turning on
+            // Start stream first, then attach vision to the existing session
             await startVideo();
-            // If already connected, we need to reconnect with video
-            if (isConnected && voiceMode) {
-                disconnect();
-                setTimeout(() => {
-                    connect(buildSystemInstruction(focusTopic), undefined, null, videoRef.current);
-                }, 500);
+            if (isConnected && voiceMode && videoRef.current) {
+                // Attach video frame capture to the live session directly - no disconnect needed
+                startVideoCapture(videoRef.current);
             }
         }
     };
@@ -571,6 +565,7 @@ ${answersContent}
 
     // Stop live camera stream
     const stopVideo = () => {
+        stopVideoCapture();
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
@@ -583,18 +578,65 @@ ${answersContent}
     const startVideo = async () => {
         setCameraError(null);
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: 'environment' } 
-            });
+            const isMobile = /iphone|ipad|android/i.test(navigator.userAgent);
+            const primaryConstraints: MediaStreamConstraints = isMobile
+                ? { video: { facingMode: 'environment' } }
+                : { video: true };
+
+            let stream = await navigator.mediaDevices.getUserMedia(primaryConstraints);
+
             if (videoRef.current) {
-                videoRef.current.srcObject = stream;
+                const videoElement = videoRef.current;
+                videoElement.srcObject = stream;
+                const playVideo = () => {
+                    videoElement.play().catch(err => {
+                        console.warn('[TutorChat] video.play() failed:', err);
+                        setCameraError('Camera started but video could not be displayed. Click the page and toggle the camera again.');
+                    });
+                };
+                if ('onloadedmetadata' in videoElement) {
+                    videoElement.onloadedmetadata = playVideo;
+                } else {
+                    playVideo();
+                }
             }
+
             streamRef.current = stream;
             setIsVideoActive(true);
             // Clear any captured image when starting live video
             setCameraImage(null);
         } catch (err: any) {
             console.error("Failed to start camera:", err);
+
+            if (err.name === 'OverconstrainedError') {
+                // Retry with a very simple constraint set
+                try {
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    if (videoRef.current) {
+                        const videoElement = videoRef.current;
+                        videoElement.srcObject = fallbackStream;
+                        const playVideo = () => {
+                            videoElement.play().catch(playErr => {
+                                console.warn('[TutorChat] fallback video.play() failed:', playErr);
+                                setCameraError('Fallback camera started but video could not be displayed.');
+                            });
+                        };
+                        if ('onloadedmetadata' in videoElement) {
+                            videoElement.onloadedmetadata = playVideo;
+                        } else {
+                            playVideo();
+                        }
+                    }
+                    streamRef.current = fallbackStream;
+                    setIsVideoActive(true);
+                    setCameraImage(null);
+                    setCameraError(null);
+                    return;
+                } catch (fallbackErr) {
+                    console.error('[TutorChat] Fallback camera failed:', fallbackErr);
+                }
+            }
+
             if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
                 setCameraError('Camera permission denied. Please allow camera access.');
             } else if (err.name === 'NotFoundError') {
@@ -743,7 +785,11 @@ ${answersContent}
                 {/* Bottom CTA */}
                 <div className="absolute bottom-0 left-0 right-0 safe-area-pb bg-linear-to-t from-[rgb(250,249,245)] via-[rgb(250,249,245)] to-transparent pt-6 pb-5 px-4">
                     <button
-                        onClick={() => { enterChat(null); handleVoiceToggle(); }}
+                        onClick={() => { 
+                            playModeEntrySound();
+                            enterChat(null); 
+                            handleVoiceToggle(); 
+                        }}
                         className="w-full bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-bold text-base py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2.5 transition-all mb-2"
                     >
                         <Mic size={22} />
@@ -807,7 +853,7 @@ ${answersContent}
                 {/* Main Visual Area */}
                 <main className="flex-1 relative flex items-center justify-center overflow-hidden pt-28 pb-4">
                     {/* Live Video Feed (when camera is active) */}
-                    <div className={`absolute inset-0 transition-opacity duration-500 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <div className={`absolute inset-0 z-20 transition-opacity duration-500 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                         <video
                             ref={videoRef}
                             autoPlay
@@ -1060,7 +1106,20 @@ ${answersContent}
                         </button>
 
                         {/* End Session Button */}
-                        <button onClick={() => { disconnect(); setVoiceMode(false); setScreenMode('chat'); }} className="flex flex-col items-center gap-2 group">
+                        <button onClick={() => { 
+                            disconnect(); 
+                            stopVideo();
+                            setVoiceMode(false); 
+                            // Check if there's actual conversation (more than just greeting)
+                            // Messages synced from voice mode don't include greeting
+                            if (messages.length <= 1) {
+                                // No real conversation, go back to overview
+                                setScreenMode('overview');
+                            } else {
+                                // Show conversation history
+                                setScreenMode('chat');
+                            }
+                        }} className="flex flex-col items-center gap-2 group">
                             <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center border border-red-100 group-hover:bg-red-100 transition-colors">
                                 <X size={24} className="text-red-500" />
                             </div>
@@ -1200,14 +1259,45 @@ ${answersContent}
                     </button>
                     <div className="min-w-0">
                         <h1 className="text-sm font-bold text-zinc-900 truncate">
-                            Chapter {chapterMetadata?.index}
+                            Conversation History
                         </h1>
                         <p className="text-[11px] font-semibold text-amber-600 uppercase tracking-wide truncate">
-                            {focusTopic || chapterDisplayName}
+                            Chapter {chapterMetadata?.index} • {chapterDisplayName}
                         </p>
                     </div>
                 </div>
             </div>
+
+            {/* Generated Media Gallery - Shows images/videos from voice session */}
+            {generatedMedia.length > 0 && (
+                <div className="bg-white border-b border-zinc-200 px-4 py-3">
+                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                        Generated Visuals ({generatedMedia.length})
+                    </p>
+                    <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
+                        {generatedMedia.map((media, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => setSelectedMedia(media)}
+                                className="shrink-0 relative rounded-xl overflow-hidden border-2 border-zinc-200 hover:border-amber-400 transition-all"
+                                style={{ width: '80px', height: '80px' }}
+                            >
+                                {media.type === 'image' ? (
+                                    <img 
+                                        src={media.url} 
+                                        alt={`Generated ${idx + 1}`}
+                                        className="w-full h-full object-cover"
+                                    />
+                                ) : (
+                                    <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                                        <Play size={20} className="text-white" />
+                                    </div>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Chat messages */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-6 scrollbar-hide flex flex-col gap-4">
@@ -1257,6 +1347,18 @@ ${answersContent}
 
             {/* Input bar */}
             <div className="bg-white border-t border-zinc-200 p-3 sm:p-4 safe-area-pb">
+                {/* Resume Voice Session Button */}
+                <button
+                    onClick={() => {
+                        playModeEntrySound();
+                        handleVoiceToggle();
+                    }}
+                    className="w-full mb-3 bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+                >
+                    <Mic size={20} />
+                    Resume Voice Session
+                </button>
+
                 {/* Camera preview in text mode */}
                 {cameraImage && (
                     <div className="flex items-center gap-2 mb-3 px-1">
@@ -1326,6 +1428,120 @@ ${answersContent}
                     </div>
                 </form>
             </div>
+
+            {/* Media Fullscreen Modal */}
+            {selectedMedia && (
+                <div 
+                    className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+                    onClick={() => {
+                        setSelectedMedia(null);
+                        setIsPlayingVideo(false);
+                    }}
+                >
+                    {/* Modal Header */}
+                    <div className="flex items-center justify-between p-4 bg-gradient-to-b from-black/50 to-transparent">
+                        <div className="flex items-center gap-2">
+                            {selectedMedia.type === 'image' ? (
+                                <ImageIcon size={20} className="text-white/70" />
+                            ) : (
+                                <Play size={20} className="text-white/70" />
+                            )}
+                            <span className="text-white/70 text-sm font-medium">
+                                {selectedMedia.type === 'image' ? 'Visual Aid' : 'Video Explanation'}
+                            </span>
+                        </div>
+                        <button 
+                            className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedMedia(null);
+                                setIsPlayingVideo(false);
+                            }}
+                        >
+                            <X size={24} />
+                        </button>
+                    </div>
+
+                    {/* Media Content - 9:16 Aspect Ratio for Mobile */}
+                    <div className="flex-1 flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="relative w-full max-w-[380px] mx-auto">
+                            {selectedMedia.type === 'image' ? (
+                                <div className="relative rounded-2xl overflow-hidden bg-zinc-900 shadow-2xl" style={{ aspectRatio: '9/16', maxHeight: '80vh' }}>
+                                    <img 
+                                        src={selectedMedia.url} 
+                                        alt="Full size" 
+                                        className="w-full h-full object-contain"
+                                    />
+                                </div>
+                            ) : (
+                                <div className="relative rounded-2xl overflow-hidden bg-zinc-900 shadow-2xl" style={{ aspectRatio: '9/16', maxHeight: '80vh' }}>
+                                    <video 
+                                        src={selectedMedia.url}
+                                        controls
+                                        autoPlay={isPlayingVideo}
+                                        className="w-full h-full object-contain"
+                                        onPlay={() => setIsPlayingVideo(true)}
+                                        onPause={() => setIsPlayingVideo(false)}
+                                    />
+                                    {!isPlayingVideo && (
+                                        <button 
+                                            className="absolute inset-0 flex items-center justify-center bg-black/40"
+                                            onClick={() => setIsPlayingVideo(true)}
+                                        >
+                                            <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center">
+                                                <Play size={32} className="text-zinc-900 ml-1" />
+                                            </div>
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Navigation Arrows */}
+                            {generatedMedia.length > 1 && (
+                                <>
+                                    <button
+                                        className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-4 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const currentIdx = generatedMedia.findIndex(m => m.url === selectedMedia.url);
+                                            const prevIdx = currentIdx > 0 ? currentIdx - 1 : generatedMedia.length - 1;
+                                            setSelectedMedia(generatedMedia[prevIdx]);
+                                            setIsPlayingVideo(false);
+                                        }}
+                                    >
+                                        <ChevronLeft size={24} />
+                                    </button>
+                                    <button
+                                        className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-4 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white hover:bg-white/30 transition-colors"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const currentIdx = generatedMedia.findIndex(m => m.url === selectedMedia.url);
+                                            const nextIdx = currentIdx < generatedMedia.length - 1 ? currentIdx + 1 : 0;
+                                            setSelectedMedia(generatedMedia[nextIdx]);
+                                            setIsPlayingVideo(false);
+                                        }}
+                                    >
+                                        <ChevronRight size={24} />
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Caption / Info */}
+                    <div className="p-4 bg-gradient-to-t from-black/80 to-transparent">
+                        {selectedMedia.prompt && (
+                            <p className="text-white/80 text-sm text-center max-w-md mx-auto line-clamp-2">
+                                {selectedMedia.prompt}
+                            </p>
+                        )}
+                        <p className="text-white/40 text-xs text-center mt-2">
+                            {generatedMedia.findIndex(m => m.url === selectedMedia.url) + 1} of {generatedMedia.length}
+                            {selectedMedia.type === 'video' && ' • Video'}
+                        </p>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

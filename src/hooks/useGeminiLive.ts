@@ -479,9 +479,11 @@ export function useGeminiLive(
             if (videoElement) {
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
-
+              let firstFrameLogged = false;
               videoIntervalRef.current = window.setInterval(() => {
-                if (!videoElement.videoWidth || !sessionRef.current) return;
+                if (!sessionRef.current) return;
+                // Require the video element to be actively playing before capturing frames
+                if (videoElement.readyState < 2 || !videoElement.videoWidth) return;
 
                 canvas.width = videoElement.videoWidth;
                 canvas.height = videoElement.videoHeight;
@@ -489,6 +491,11 @@ export function useGeminiLive(
 
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
                 const base64Data = dataUrl.split(',')[1];
+
+                if (!firstFrameLogged) {
+                  firstFrameLogged = true;
+                  console.log(`[GeminiLive] First vision frame captured: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                }
 
                 sessionPromise.then(session => {
                   if (session) {
@@ -514,6 +521,21 @@ export function useGeminiLive(
                 if (call.name === 'add_whiteboard_step') {
                   const args = call.args as any;
                   console.log('[GeminiLive] add_whiteboard_step called:', args.math);
+                  
+                  // Add whiteboard step to messages for session tracking
+                  updateMessages(prev => {
+                    const whiteboardMsg: SessionMessage = {
+                      role: 'ai',
+                      text: `[Whiteboard] ${args.title || 'Step'}: ${args.explanation || 'Working through the solution...'}`,
+                      timestamp: Date.now(),
+                      whiteboardStep: {
+                        math: args.math || '',
+                        explanation: args.explanation || '',
+                      },
+                    };
+                    return [...prev, whiteboardMsg];
+                  });
+                  
                   setWhiteboardState(prev => {
                     const newStep: WhiteboardStep = {
                       id: `step-${prev.steps.length}-${Date.now()}`,
@@ -955,6 +977,54 @@ export function useGeminiLive(
     }
   }, [isConnected, updateMessages]);
 
+  // Start sending video frames from a live camera to an existing session.
+  // This lets you add vision to an already-connected session without reconnecting.
+  const startVideoCapture = useCallback((videoElement: HTMLVideoElement) => {
+    // Clear any existing capture interval
+    if (videoIntervalRef.current) {
+      window.clearInterval(videoIntervalRef.current);
+      videoIntervalRef.current = null;
+    }
+
+    if (!sessionRef.current) {
+      console.warn('[GeminiLive] startVideoCapture called but session is not connected');
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    videoIntervalRef.current = window.setInterval(() => {
+      if (!sessionRef.current) return;
+      if (videoElement.readyState < 2 || !videoElement.videoWidth) return;
+
+      canvas.width = videoElement.videoWidth;
+      canvas.height = videoElement.videoHeight;
+      ctx?.drawImage(videoElement, 0, 0);
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+      const base64Data = dataUrl.split(',')[1];
+
+      try {
+        sessionRef.current.sendRealtimeInput({
+          media: { data: base64Data, mimeType: 'image/jpeg' }
+        });
+      } catch (e) {
+        console.error('[GeminiLive] Failed to send video frame:', e);
+      }
+    }, 1000);
+
+    console.log('[GeminiLive] Video capture started on existing session');
+  }, []);
+
+  const stopVideoCapture = useCallback(() => {
+    if (videoIntervalRef.current) {
+      window.clearInterval(videoIntervalRef.current);
+      videoIntervalRef.current = null;
+      console.log('[GeminiLive] Video capture stopped');
+    }
+  }, []);
+
   // Navigation for media gallery
   const nextMedia = useCallback(() => {
     setCurrentMediaIndex(prev => Math.min(prev + 1, generatedMedia.length - 1));
@@ -1005,6 +1075,8 @@ export function useGeminiLive(
     disconnect,
     toggleMute,
     sendClientMessage,
+    startVideoCapture,
+    stopVideoCapture,
     nextMedia,
     prevMedia,
     setCurrentImage,

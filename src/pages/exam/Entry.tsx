@@ -6,7 +6,7 @@ import {
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useAuth } from '../../contexts/AuthContext';
-import { useSessions } from '../../hooks/useSessions';
+import { useSessions, SessionMessage } from '../../hooks/useSessions';
 import { useGeminiReasoning, ConceptHook } from '../../hooks/useGeminiReasoning';
 import { useExamMachine, getNextStep } from '../../machines/examMachine';
 import CarouselViewer from '../../components/Carousel/CarouselViewer';
@@ -112,14 +112,30 @@ export default function ExamEntry() {
     isConnected, isConnecting, isSilent, isMuted,
     messages, currentImage, isGeneratingImage,
     connect, disconnect, toggleMute, sendClientMessage,
+    startVideoCapture, stopVideoCapture,
   } = useGeminiLive('exam', (msgs) => {
     saveSession('exam', msgs, sessionIdRef.current);
   });
 
+  // Live camera state for exam mode (optional vision)
+  const [isVideoActive, setIsVideoActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
   // Cleanup on unmount
   useEffect(() => {
-    return () => { disconnect(); };
-  }, []);
+    return () => {
+      // Stop any active camera stream and vision capture
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      stopVideoCapture();
+      setIsVideoActive(false);
+      disconnect();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-wire: hooks_generation → evaluateTranscript ────────────────────
   useEffect(() => {
@@ -186,6 +202,22 @@ export default function ExamEntry() {
     return () => unsubscribe();
   }, [currentUser?.uid]);
 
+  // Play notification sound on mount
+  useEffect(() => {
+    playModeEntrySound();
+  }, []);
+
+  // ── Auto-connect mic on mount (like Lab/Tutor) ───────────────────────────
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!isConnected && !isConnecting) {
+        handleConnect();
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -205,13 +237,106 @@ export default function ExamEntry() {
   };
 
   const handleConnect = () => {
-    const instruction = getExamSystemInstruction(profile, examContext);
-    let previousMessages;
+    let instruction = getExamSystemInstruction(profile, examContext);
+    let previousMessages: SessionMessage[] | undefined;
+    
+    // Handle resume flow
     if (resumeId) {
       const session = sessions.find((s) => s.id === resumeId);
-      if (session) previousMessages = session.messages;
+      if (session && session.messages.length > 0) {
+        previousMessages = session.messages;
+        
+        // Add resume-specific instruction with recap prompt
+        const lastMessages = session.messages.slice(-3);
+        const lastTopic = session.summary || 'this topic';
+        const lastUserMessage = [...session.messages].reverse().find(m => m.role === 'user')?.text || '';
+        const lastAiMessage = [...session.messages].reverse().find(m => m.role === 'ai')?.text || '';
+        
+        instruction += `
+
+--- RESUME CONTEXT ---
+The user is resuming a previous session. Here is what you discussed before:
+
+Session Summary: ${lastTopic}
+
+Recent conversation:
+${lastMessages.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n')}
+
+IMPORTANT: When you start speaking, begin with a warm recap like:
+"Okay, in our previous session on ${lastTopic}, here's where we stopped: [brief summary of last discussion]. Do you want me to continue from there, or do you have anything else in mind?"
+
+Then wait for the user to respond before continuing.`;
+      }
     }
+    
     connect(instruction, previousMessages, selectedImage);
+  };
+
+  // Live camera helpers (for vision inside exam mode)
+  const stopVideo = () => {
+    stopVideoCapture();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsVideoActive(false);
+    setCameraError(null);
+  };
+
+  const startVideo = async () => {
+    setCameraError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 15 },
+        }
+      });
+
+      if (videoRef.current) {
+        const videoElement = videoRef.current;
+        videoElement.srcObject = stream;
+        const playVideo = () => {
+          videoElement.play().catch(err => {
+            console.warn('[Exam] video.play() failed:', err);
+            setCameraError('Camera started but video could not be displayed. Click the page and toggle the camera again.');
+          });
+        };
+        if ('onloadedmetadata' in videoElement) {
+          videoElement.onloadedmetadata = playVideo;
+        } else {
+          playVideo();
+        }
+      }
+
+      streamRef.current = stream;
+      setIsVideoActive(true);
+
+      // Attach live vision to an existing session if already connected
+      if (isConnected && videoRef.current) {
+        startVideoCapture(videoRef.current);
+      }
+    } catch (err: any) {
+      console.error('[Exam] Failed to start camera:', err);
+      let errorMessage = 'Could not access camera.';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage = 'Camera permission denied. Please allow camera access in your browser settings and try again.';
+      } else if (err.name === 'NotFoundError') {
+        errorMessage = 'No camera found on this device.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage = 'Camera is already in use by another app. Please close other apps using the camera.';
+      }
+      setCameraError(errorMessage);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (isVideoActive) {
+      stopVideo();
+    } else {
+      startVideo();
+    }
   };
 
   // Handle textbook selection
@@ -376,6 +501,26 @@ export default function ExamEntry() {
       {/* ── Main Visual Area ─────────────────────────────────────────────── */}
       <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6 pt-24">
 
+        {/* Live Video Feed (when camera is active) */}
+        {isVideoActive && (
+          <div className="absolute inset-0">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+          </div>
+        )}
+
+        {/* Camera error banner */}
+        {cameraError && (
+          <div className="absolute top-8 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm font-medium shadow-md z-30 text-center">
+            {cameraError}
+          </div>
+        )}
+
         {selectedImage && (
           <div className="absolute inset-0 p-6 flex items-center justify-center">
             <div className="relative w-full max-w-md aspect-[4/3] rounded-3xl overflow-hidden shadow-lg border border-zinc-200 bg-white">
@@ -448,8 +593,9 @@ export default function ExamEntry() {
 
       {/* ── Bottom Controls ──────────────────────────────────────────────── */}
       <div className="bg-white border-t border-zinc-200 p-6 pb-8 z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
-        <div className="flex items-center justify-center gap-12 max-w-md mx-auto">
+        <div className="flex items-center justify-center gap-10 max-w-md mx-auto">
 
+          {/* Photo upload */}
           <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
             <div className="w-14 h-14 rounded-full bg-zinc-50 flex items-center justify-center border border-zinc-200 group-hover:bg-zinc-100 transition-colors">
               <Camera size={24} className="text-zinc-600" />
@@ -458,13 +604,33 @@ export default function ExamEntry() {
           </button>
           <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
 
+          {/* Live video toggle */}
+          <button onClick={toggleVideo} className="flex flex-col items-center gap-2 group">
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center border transition-colors shadow-sm ${
+              isVideoActive
+                ? 'bg-teal-500/10 border-teal-400 text-teal-600'
+                : 'bg-zinc-50 border-zinc-200 text-zinc-600 group-hover:bg-zinc-100'
+            }`}>
+              <Camera size={24} className={isVideoActive ? 'text-teal-600' : 'text-zinc-600'} />
+            </div>
+            <span className={`text-xs font-medium ${isVideoActive ? 'text-teal-600' : 'text-zinc-500'}`}>
+              {isVideoActive ? 'Live' : 'Video'}
+            </span>
+          </button>
+
+          {/* Mic toggle / status */}
           <button onClick={handleMicClick} className="flex flex-col items-center gap-2 group">
-            <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 transition-all shadow-sm ${isConnected ? (isMuted ? 'bg-zinc-100 border-zinc-300 text-zinc-500' : 'bg-amber-500 border-amber-400 text-white shadow-amber-500/30 scale-110') : 'bg-zinc-50 border-zinc-200 text-zinc-600 group-hover:bg-zinc-100'}`}>
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 transition-all shadow-sm ${
+              isConnected
+                ? (isMuted ? 'bg-zinc-100 border-zinc-300 text-zinc-500' : 'bg-amber-500 border-amber-400 text-white shadow-amber-500/30 scale-110')
+                : 'bg-zinc-50 border-zinc-200 text-zinc-600 group-hover:bg-zinc-100'
+            }`}>
               {isConnected && !isMuted ? <Mic size={28} /> : <MicOff size={28} />}
             </div>
             <span className={`text-xs font-medium ${isConnected && !isMuted ? 'text-amber-600' : 'text-zinc-500'}`}>Mic</span>
           </button>
 
+          {/* End exam */}
           <button onClick={handleEndExam} className="flex flex-col items-center gap-2 group">
             <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center border border-red-100 group-hover:bg-red-100 transition-colors">
               <X size={24} className="text-red-500" />

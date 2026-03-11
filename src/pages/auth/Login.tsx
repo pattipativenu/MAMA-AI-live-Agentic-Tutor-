@@ -61,7 +61,7 @@ export default function Login() {
 
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center p-4 mb-4">
-            <img src="/assets/mama-ai-logo.png" alt="Mama AI Logo" className="w-32 h-auto object-contain" />
+            <img src="/assets/Mama_logo.png" alt="Mama AI Logo" className="w-32 h-auto object-contain" />
           </div>
           <p className="text-zinc-600 font-medium text-sm px-4">A multi-modal personal tutor that can see, hear, respond, and generate for you.</p>
           <h1 className="text-3xl font-bold tracking-tight mt-6">Welcome back</h1>
