@@ -38,32 +38,40 @@ function buildGreeting(name: string, chapterTitle: string): string {
 /** Build learning style specific instructions */
 function buildLearningStyleInstructions(learningStyle: string, hobbies: string[]): string {
     const hobbyList = hobbies?.length > 0 ? hobbies.join(', ') : 'general interests';
-    
+    // Normalize to lowercase so stored values ('visual', 'auditory', etc.) match map keys
+    const normalized = (learningStyle || 'visual').toLowerCase();
+
     const styleMap: Record<string, string> = {
-        'Visual': `
+        'visual': `
     - Use diagrams, charts, and visual descriptions frequently
     - Describe concepts using spatial relationships and visual metaphors
     - When explaining, paint a mental picture: "Imagine you can see..."`,
-        'Auditory': `
+        'auditory': `
     - Use rhythmic patterns, mnemonics, and verbal explanations
     - Encourage the student to repeat concepts aloud
     - Use sound-based analogies and verbal walkthroughs`,
-        'Kinesthetic': `
+        'kinesthetic': `
     - Use hands-on examples, physical analogies, and movement-based explanations
     - Connect concepts to real-world physical activities
     - Suggest experiments or physical demonstrations`,
-        'Reading/Writing': `
+        'reading/writing': `
     - Provide structured written explanations with clear headings
     - Encourage note-taking and written summaries
-    - Use lists, bullet points, and written definitions`
+    - Use lists, bullet points, and written definitions`,
+        'all': `
+    - ADAPTIVE STYLE: You decide which teaching method works best for each concept.
+    - Visual concepts (geometry, diagrams, processes) → use visual descriptions and whiteboard.
+    - Verbal/logical concepts (proofs, reasoning) → use clear verbal walkthroughs and mnemonics.
+    - Hands-on concepts (experiments, forces) → use physical analogies and activities.
+    - Mix styles freely — choose whatever will make the concept click for this student.`
     };
 
     return `
     <learning_style_instructions>
-      <style>${learningStyle || 'Visual'}</style>
+      <style>${normalized}</style>
       <hobbies>${hobbyList}</hobbies>
       <instructions>
-        ${styleMap[learningStyle] || styleMap['Visual']}
+        ${styleMap[normalized] || styleMap['visual']}
         - Connect examples to the student's hobbies: ${hobbyList}
         - Use analogies from their interests to explain complex concepts
       </instructions>
@@ -119,7 +127,16 @@ function buildImageFormatInstructions(): string {
       - Text and diagrams must be large and readable on phone screens
       - This is a HARD REQUIREMENT - no exceptions</instruction>
       <penalty>If you generate 16:9 or square images, the user cannot see them properly on their phone.</penalty>
-    </image_format>`;
+    </image_format>
+    <image_series_rule>
+      IMAGE SERIES: When introducing or explaining any topic, automatically call generate_image
+      2–4 times in sequence, each with a DIFFERENT perspective on the same concept:
+        • Call 1 — Overview/big-picture: the full concept in context
+        • Call 2 — Close-up/detail: zoom into the key mechanism or structure
+        • Call 3 — Real-world application: where this appears in the real world
+        • Call 4 (optional) — Comparison/process: contrasting states or step-by-step sequence
+      Each prompt must be self-contained and visually distinct. Do NOT generate the same image twice.
+    </image_series_rule>`;
 }
 
 /** Build whiteboard mode instructions for formula explanations */
@@ -183,7 +200,23 @@ RULES:
 1. NEVER add all steps at once — ONE step per function call
 2. ALWAYS pause between steps to ask questions
 3. Use highlight_whiteboard_step to refer back to earlier work
-4. The student CANNOT see math unless you call add_whiteboard_step`;
+4. The student CANNOT see math unless you call add_whiteboard_step
+
+═══ WHITEBOARD ANNOUNCEMENT ═══
+
+Before calling add_whiteboard_step for the FIRST time on any topic, you MUST first say out loud
+something like "Let me explain this on the whiteboard" or "Let me draw this out for you on the
+whiteboard" — then immediately call add_whiteboard_step. Never silently open the whiteboard
+without verbally announcing it first.
+
+═══ WHITEBOARD + MEDIA INTEGRATION ═══
+
+You also have two media tools: show_media(mediaIndex) and hide_media().
+When you have already generated images or videos and are explaining on the whiteboard:
+• Use show_media(-1) to pull up the most recently generated image/video mid-explanation.
+  Example: "Let me show you the diagram we just created..." → call show_media(-1) → explain verbally → call hide_media().
+• After showing and explaining the visual, call hide_media() to close it and return to the whiteboard.
+• Never leave show_media open indefinitely — always follow it with hide_media() once explained.`;
 }
 
 
@@ -287,6 +320,8 @@ export default function TutorChat() {
         startVideoCapture,
         stopVideoCapture,
         completeWhiteboardStep,
+        isMediaFocused,
+        hideMedia,
     } = useGeminiLive(
         'tutor',
         (msgs) => {
@@ -440,6 +475,8 @@ ${answersContent}
     <rule>ONLY use the student's hobbies (${hobbies.join(', ') || 'general interests'}) for COMPLEX or DIFFICULT concepts that need analogies. For simple concepts, explain directly without hobby references. Use hobbies sparingly — at most once per explanation, only when it genuinely helps understanding.</rule>
     <rule>When generating images, ALWAYS apply the visual theme: ${theme}. Images MUST be in 9:16 portrait format for mobile viewing.</rule>
     <rule>${autoAdvance ? 'When you generate images, present them one at a time, explain each fully, then automatically move to the next.' : 'When you generate images, present them all at once and let the user click through them manually.'}</rule>
+    <rule>VIDEO RULE: Automatically generate one video per topic. Only generate a second video for the same topic if the student explicitly requests it (e.g. "show me another video", "animate that differently"). Never auto-generate more than one video per concept.</rule>
+    <rule>WHITEBOARD + MEDIA: When on the whiteboard and you have previously generated images or videos, use show_media(-1) to briefly pull up the most relevant visual mid-explanation, explain it, then call hide_media() to return to the whiteboard. ${autoAdvance ? 'Auto-advance is ON: manage the transition yourself — show the visual, explain it, then call hide_media() before continuing.' : 'Auto-advance is OFF: wait for the student to indicate they are done viewing before calling hide_media().'}</rule>
     <rule>When referencing textbook pages, ALWAYS pause and ask if the student has found the page before continuing.</rule>
     ${topicFocus ? `<rule>The student has chosen to focus on "${topicFocus}" — start by giving a clear, friendly introduction to this specific topic.</rule>` : ''}
   </rules>
@@ -880,29 +917,38 @@ ${answersContent}
                     <div className="relative flex flex-col items-center justify-center z-10 w-full h-full px-4">
                         {isConnected ? (
                             <>
-                                {/* PRIORITY 1: Whiteboard for formula explanations */}
-                                {(whiteboardState.isActive || whiteboardState.steps.length > 0) ? (
+                                {/* PRIORITY 1: Whiteboard for formula explanations (hidden when show_media is active) */}
+                                {(whiteboardState.isActive || whiteboardState.steps.length > 0) && !isMediaFocused ? (
                                     <div className="w-full h-full max-w-[400px]">
                                         <WhiteboardView
                                             whiteboardState={whiteboardState}
                                             onStepComplete={completeWhiteboardStep}
                                         />
                                     </div>
-                                ) : 
-                                /* PRIORITY 2: Current generated image */
+                                ) :
+                                /* PRIORITY 2: Current generated image (or show_media focus) */
                                 currentImage ? (
-                                    <div 
+                                    <div
                                         className="w-full max-w-[340px] h-[70%] relative rounded-2xl overflow-hidden shadow-2xl border-2 border-amber-200 cursor-pointer"
                                         onClick={() => {
                                             const media = generatedMedia.find(m => m.url === currentImage);
                                             if (media) setSelectedMedia(media);
                                         }}
                                     >
-                                        <img 
-                                            src={currentImage} 
-                                            alt="Generated visual" 
+                                        <img
+                                            src={currentImage}
+                                            alt="Generated visual"
                                             className="w-full h-full object-contain bg-black"
                                         />
+                                        {/* Back to Whiteboard button — shown when media was called from whiteboard */}
+                                        {isMediaFocused && whiteboardState.steps.length > 0 && (
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); hideMedia(); }}
+                                                className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-amber-700 border border-amber-200 shadow-sm"
+                                            >
+                                                <ChevronLeft size={14} /> Back to Whiteboard
+                                            </button>
+                                        )}
                                         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent p-4">
                                             <p className="text-white text-sm font-medium flex items-center gap-2">
                                                 <ImageIcon size={16} />

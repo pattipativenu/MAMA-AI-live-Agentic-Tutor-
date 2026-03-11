@@ -23,6 +23,25 @@ function getAudienceNote(age: string): string {
   return `Visual complexity calibrated for a ${age} student — balance visual clarity with moderate technical detail, labelled diagrams, and clear relational indicators.`;
 }
 
+// ── Subject-aware visual guidance ────────────────────────────────────────────
+
+function getSubjectVisualNote(concept: string): string {
+  const c = concept.toLowerCase();
+  if (/cell|organ|muscle|nerve|blood|tissue|anatomy|physiology|plant|animal|dna|protein|enzyme|mitosis|meiosis|respiration|photosynthesis/.test(c)) {
+    return 'Biology/anatomy style: photorealistic or semi-realistic subject with a warm anatomical colour palette (cream/rose for tissue, blue for veins and water flow, yellow for nerves and energy signals). Include at least one circular or rectangular zoom-inset callout showing the micro-level detail of the key structure, connected with a clean line or arrow to the macro view.';
+  }
+  if (/atom|molecule|bond|reaction|electron|orbital|crystal|ionic|covalent|periodic|element|compound|acid|base|polymer|solution/.test(c)) {
+    return 'Chemistry style: precise 3D molecular or atomic structure with CPK colour-coded atoms (red=oxygen, light-grey=hydrogen, dark-grey=carbon, blue=nitrogen), clean visible bond lines. Use a white background for molecular diagrams or a dark dramatic backdrop for quantum/orbital concepts.';
+  }
+  if (/force|wave|light|electric|magnetic|quantum|energy|momentum|optic|circuit|current|gravity|motion|velocity|acceleration|thermodynamic|fluid/.test(c)) {
+    return 'Physics style: bold directional arrows for forces and fields, vibrant colour-coded field lines, precise geometric diagrams with vector annotations and magnitude labels. Use a dark background for electromagnetic/quantum topics, white for classical mechanics/optics.';
+  }
+  if (/triangle|circle|graph|function|calculus|algebra|geometry|theorem|equation|proof|matrix|vector|set|probability|statistics/.test(c)) {
+    return 'Mathematics style: clean white or faint grid background, precise geometric construction with a compass-and-ruler aesthetic, colour-coded elements (navy blue=primary object, red=derived or measured, green=known or given), inline mathematical notation. No decorative clutter.';
+  }
+  return 'Include clear functional colour-coding, purposeful annotation arrows with labels, and at least one zoom-inset callout if the concept has both a macro view and a micro or molecular detail worth showing side-by-side.';
+}
+
 // ── Per-theme art direction ───────────────────────────────────────────────────
 
 const THEME_DIRECTIONS: Record<
@@ -35,7 +54,7 @@ const THEME_DIRECTIONS: Record<
     lighting:
       'Soft, diffused studio lighting with gentle highlights that reveal depth and texture without harsh shadows. Subtle ambient occlusion adds dimensionality.',
     composition:
-      'Composed as a clear educational diagram on a clean white or light-grey background. Elements are well-spaced, colour-coded, and accompanied by crisp annotation arrows that guide the eye.',
+      'Composed as a clear educational diagram on a clean white or light-grey background. For complex topics, use a multi-panel layout: one main wide-view illustration plus one or two circular or rectangular zoom-inset callouts revealing key micro-level or cross-sectional detail. For comparative concepts (healthy vs. diseased, before vs. after), use a split-panel side-by-side layout. Elements are well-spaced, functionally colour-coded, and accompanied by crisp annotation arrows and clean label lines that walk the viewer through the concept step by step.',
   },
   space: {
     style:
@@ -89,6 +108,8 @@ function buildImagePrompt(concept: string, theme: string, age: string): string {
     ? getAudienceNote(age)
     : 'Use clear, universally accessible visual complexity suitable for high-school students.';
 
+  const subjectNote = getSubjectVisualNote(concept);
+
   return `
 Create a stunning educational visual that makes the concept "${concept}" immediately clear, memorable, and beautiful.
 
@@ -104,8 +125,13 @@ ${composition}
 EDUCATIONAL REQUIREMENTS:
 • The concept "${concept}" must be the unmistakable focal point — every visual element should serve its understanding, nothing else.
 • ${complexityNote}
+• ${subjectNote}
+• CRITICAL — SPELLING: Every scientific term, label, and annotation must be spelled with exact precision. Examples of common errors to avoid: "Phosphate" not "Phospate", "Cytosine" not "Cytsome", "Mitochondria" not "Mitocondria", "Electromagnetic" not "Electromangetic". Scientific accuracy in text labels is non-negotiable for an educational tool.
+• OUTPUT TYPE: Generate a scientific ILLUSTRATION or CONCEPT DIAGRAM — NOT a flowchart, UML activity diagram, sequence diagram, or data visualisation chart — unless the concept is explicitly about a process flow or a data set. Visual storytelling through illustration always beats text-heavy boxes and connector lines.
+• ZOOM INSETS: For biological, anatomical, or microscopic concepts, include at least one circular or rectangular zoom-inset callout that magnifies a key micro-level detail and connects it with a clean arrow or line to the macro subject.
+• COLOUR LANGUAGE: Apply functional colour coding — red/orange = heat/danger/inflammation/energy; blue/cyan = fluid/cold/electrical signals; green = growth/normal/positive/safe; yellow/amber = chemical bonds/caution/transition; purple/violet = nerve signals/quantum effects.
 • Use concrete visual metaphors and real-world scale references to make abstract ideas instantly tangible.
-• Keep any text or symbols minimal and crystal-clear — prioritise visual storytelling and colour-coded relationships over labels.
+• Keep any text or symbols minimal and crystal-clear — prioritise visual storytelling and colour-coded relationships over dense labelling.
 • Include purposeful indicators (arrows, flow lines, highlights, or motion trails) to show direction, force, energy transfer, or cause and effect where relevant.
 • Wide landscape 16:9 format.
 

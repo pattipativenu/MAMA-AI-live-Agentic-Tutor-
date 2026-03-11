@@ -61,6 +61,9 @@ export function useGeminiLive(
   const [whiteboardState, setWhiteboardState] = useState<WhiteboardState>(DEFAULT_WHITEBOARD_STATE);
   const whiteboardBufferRef = useRef('');  // Buffer for incomplete whiteboard markers
 
+  // Media focus state — true when show_media is active (image overlays whiteboard temporarily)
+  const [isMediaFocused, setIsMediaFocused] = useState(false);
+
   // Ref so onaudioprocess callback always reads the LATEST muted state (avoids stale closure bug)
   const isMutedRef = useRef(false);
 
@@ -355,7 +358,7 @@ export function useGeminiLive(
 
       const generateVideoDeclaration: FunctionDeclaration = {
         name: "generate_video",
-        description: "Generates an 8-second silent educational animation video to demonstrate a complex concept or physical process. Use this when explaining dynamic phenomena (osmosis, forces, chemical reactions, planetary motion, etc.) that would benefit from visual animation. This creates a video that will appear in the media gallery while you continue explaining.",
+        description: "Generates an 8-second silent educational animation video to demonstrate a complex concept or physical process. Use this when explaining dynamic phenomena (osmosis, forces, chemical reactions, planetary motion, etc.) that would benefit from visual animation. This creates a video that will appear in the media gallery while you continue explaining. VIDEO DEFAULT RULE: Generate at most ONE video per topic by default. Only call generate_video a second time for the same topic if the student explicitly asks for another animation (e.g. 'show me another video', 'animate that differently'). Never auto-generate more than one video per concept without a student request.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -377,6 +380,30 @@ export function useGeminiLive(
         }
       };
 
+      const showMediaDeclaration: FunctionDeclaration = {
+        name: "show_media",
+        description: "Display a previously generated image or video to the student while on the whiteboard. Use this mid-explanation to pull up a relevant visual, show it, explain it verbally, then call hide_media() to return to the whiteboard. Pass -1 to show the most recently generated media.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            mediaIndex: {
+              type: Type.NUMBER,
+              description: "Zero-based index of the media item to show from the generated media list. Pass -1 to show the most recently generated image or video."
+            }
+          },
+          required: ["mediaIndex"]
+        }
+      };
+
+      const hideMediaDeclaration: FunctionDeclaration = {
+        name: "hide_media",
+        description: "Close the currently displayed image or video and return focus to the whiteboard. Call this after you have finished explaining the visual aid.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {}
+        }
+      };
+
       let finalSystemInstruction = systemInstruction;
       if (previousMessages && previousMessages.length > 0) {
         const historyText = previousMessages.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n');
@@ -395,7 +422,7 @@ export function useGeminiLive(
       const sessionPromise = ai.live.connect({
         model: liveModel,
         config: {
-          tools: [{ functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration] }],
+          tools: [{ functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration, showMediaDeclaration, hideMediaDeclaration] }],
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: { 
@@ -597,16 +624,20 @@ export function useGeminiLive(
 
                     if (base64Image) {
                       setCurrentImage(base64Image);
-                      const mediaItem: GeneratedMedia = {
-                        type: 'image',
-                        url: base64Image,
-                        prompt,
-                        timestamp: Date.now(),
-                        caption: 'Generated visual aid'
-                      };
-                      setGeneratedMedia(prev => [...prev, mediaItem]);
+                      let newIndex = 0;
+                      setGeneratedMedia(prev => {
+                        newIndex = prev.length;
+                        const mediaItem: GeneratedMedia = {
+                          type: 'image',
+                          url: base64Image,
+                          prompt,
+                          timestamp: Date.now(),
+                          caption: 'Generated visual aid'
+                        };
+                        return [...prev, mediaItem];
+                      });
                       setCurrentMediaIndex(prev => prev + 1);
-                      
+
                       updateMessages(prev => {
                         const last = prev[prev.length - 1];
                         if (last && last.role === 'ai') {
@@ -614,7 +645,7 @@ export function useGeminiLive(
                         }
                         return [...prev, { role: 'ai', text: '', image: base64Image }];
                       });
-                      return { id: call.id, name: call.name, response: { success: true, message: "Image generated and displayed to the user." } };
+                      return { id: call.id, name: call.name, response: { success: true, message: `Image generated and added to media gallery at index ${newIndex}. You can show it mid-whiteboard with show_media(${newIndex}).` } };
                     } else {
                       return { id: call.id, name: call.name, response: { success: false, message: "Failed to generate image." } };
                     }
@@ -707,6 +738,29 @@ export function useGeminiLive(
                     setStatus('explaining');
                   }
                 }
+                if (call.name === 'show_media') {
+                  const idx = (call.args as any).mediaIndex;
+                  // Access latest generatedMedia via setGeneratedMedia callback to avoid stale closure
+                  let targetIndex = idx;
+                  let targetUrl: string | null = null;
+                  setGeneratedMedia(prev => {
+                    const resolvedIndex = idx === -1 ? prev.length - 1 : idx;
+                    targetIndex = resolvedIndex;
+                    targetUrl = prev[resolvedIndex]?.url ?? null;
+                    return prev; // no change
+                  });
+                  if (targetUrl) {
+                    setCurrentImage(targetUrl);
+                    setIsMediaFocused(true);
+                  }
+                  return { id: call.id, name: call.name, response: { result: `Showing media item ${targetIndex}. Call hide_media() when done explaining it.` } };
+                }
+
+                if (call.name === 'hide_media') {
+                  setIsMediaFocused(false);
+                  return { id: call.id, name: call.name, response: { result: 'Media closed. Whiteboard is now in focus.' } };
+                }
+
                 return { id: call.id, name: call.name, response: { success: false, message: "Unknown function" } };
               }));
 
@@ -1057,6 +1111,11 @@ export function useGeminiLive(
     whiteboardBufferRef.current = '';
   }, []);
 
+  // Dismiss media focus manually (e.g. "← Back to Whiteboard" button)
+  const hideMedia = useCallback(() => {
+    setIsMediaFocused(false);
+  }, []);
+
   return {
     isConnected,
     isConnecting,
@@ -1082,5 +1141,7 @@ export function useGeminiLive(
     setCurrentImage,
     completeWhiteboardStep,
     clearWhiteboard,
+    isMediaFocused,
+    hideMedia,
   };
 }

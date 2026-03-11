@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, Mic, PlaySquare, Settings as SettingsIcon, Volume2, Play, AlertCircle } from 'lucide-react';
+import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, PlaySquare, Settings as SettingsIcon, Volume2, Play, AlertCircle } from 'lucide-react';
 import { UserProfile, GEMINI_VOICES, GeminiVoice } from '../hooks/useProfile';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc } from 'firebase/firestore';
@@ -360,6 +360,23 @@ export default function Settings() {
                     </button>
                   );
                 })}
+
+                {/* All Styles — Let Gemini Decide */}
+                <button
+                  onClick={() => setFormData({ ...formData, learningStyle: 'all' })}
+                  className={`w-full flex items-center gap-4 p-4 rounded-2xl border transition-all text-left shadow-sm group ${formData.learningStyle === 'all'
+                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                    : 'bg-zinc-50 border-zinc-200 text-zinc-600 hover:border-amber-200 hover:bg-amber-50/50'
+                    }`}
+                >
+                  <div className={`p-2.5 rounded-xl transition-colors ${formData.learningStyle === 'all' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white border border-zinc-200 text-zinc-400 group-hover:text-amber-500'}`}>
+                    <Sparkles size={20} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className={`font-bold text-sm block ${formData.learningStyle === 'all' ? 'text-amber-900' : 'text-zinc-600'}`}>All Styles (Let Gemini Decide)</span>
+                    <span className="text-xs text-zinc-400 font-medium">Mama AI picks the best style for each concept</span>
+                  </div>
+                </button>
               </div>
             </div>
           </div>
@@ -479,37 +496,15 @@ export default function Settings() {
               </div>
             </div>
 
-            {/* Voice Speed */}
-            <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm">
-              <div className="flex items-center gap-2 text-zinc-800 mb-2">
-                <Mic size={18} className="text-[#fe9900]" />
-                <h2 className="text-sm font-bold uppercase tracking-wider">Voice Speed</h2>
-              </div>
-              <div className="flex p-1 bg-zinc-100/80 rounded-2xl w-full shadow-inner border border-zinc-200/50">
-                {(['slow', 'normal', 'fast'] as const).map(speed => (
-                  <button
-                    key={speed}
-                    onClick={() => setFormData({ ...formData, voiceSpeed: speed })}
-                    className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all capitalize ${(formData.voiceSpeed || 'normal') === speed
-                      ? 'bg-white shadow-sm text-[#fe9900]'
-                      : 'text-zinc-500 hover:text-zinc-700'
-                      }`}
-                  >
-                    {speed}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Auto-Advance Carousel */}
+            {/* Auto-Scroll Visuals */}
             <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm flex items-center justify-between">
               <div className="pr-4">
                 <div className="flex items-center gap-2 text-zinc-800 mb-1">
                   <PlaySquare size={18} className="text-[#fe9900]" />
-                  <h2 className="text-sm font-bold uppercase tracking-wider">Auto-Advance Carousel</h2>
+                  <h2 className="text-sm font-bold uppercase tracking-wider">Auto-Scroll Visuals</h2>
                 </div>
                 <p className="text-xs text-zinc-500 font-medium leading-relaxed">
-                  Automatically move to the next slide when Mama AI finishes explaining it.
+                  Automatically scrolls through images and visuals as Mama AI explains them — no manual tapping needed.
                 </p>
               </div>
 

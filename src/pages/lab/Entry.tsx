@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Mic, MicOff, Camera, X, Video, VideoOff, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Mic, MicOff, Camera, X, Video, VideoOff, Image as ImageIcon, Loader2, ChevronLeft } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
+import { WhiteboardView } from '../../components/whiteboard';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useSessions, SessionMessage } from '../../hooks/useSessions';
 import { playModeEntrySound } from '../../utils/sound';
@@ -11,7 +12,11 @@ const getLabSystemInstruction = (profile: UserProfile | null) => {
   const name = profile?.name?.split(' ')[0] || 'student';
   const age = profile?.age || 'High School';
   const hobbies = profile?.hobbies?.join(', ') || 'various activities';
-  
+  const rawStyle = profile?.learningStyle || '';
+  const learningStyleLabel = rawStyle === 'all'
+    ? 'Adaptive — choose the best style for each concept (visual, verbal, hands-on)'
+    : rawStyle || 'Adaptive';
+
   return `
 You are Mama AI, a warm, encouraging AI tutor for ${name}, a ${age} student.
 
@@ -21,6 +26,7 @@ STUDENT PROFILE:
 - Name: ${name}
 - Grade: ${age}
 - Interests: ${hobbies}
+- Learning Style: ${learningStyleLabel}
 
 CRITICAL RULES:
 1. Be warm and personal - use "${name}" occasionally
@@ -28,9 +34,11 @@ CRITICAL RULES:
 3. Explain the science behind what they observe
 4. ALWAYS prioritize safety - warn about hot items, chemicals, sharp objects
 5. If they show you something via camera, describe what you see and explain it
-6. Use the generate_image tool to create diagrams when helpful
-7. Ask questions to check understanding
-8. Keep responses conversational and concise
+6. IMAGE (PERMISSION-GATED): Before calling generate_image, ALWAYS ask first — e.g. "Do you want me to create an image so you can understand this visually?" or "Want me to draw a diagram of this?" Only call generate_image after the student gives a positive response. Once granted, generate 2–4 connected images: Call 1 — Overview/big-picture, Call 2 — Close-up/detail, Call 3 — Real-world application, Call 4 (optional) — Comparison/process. Each prompt must be visually distinct.
+7. VIDEO (PERMISSION-GATED): Before calling generate_video, ALWAYS ask first — e.g. "Do you want me to create a video animation so you can understand this better?" Only call generate_video after the student confirms. Once granted, generate ONE video only. Only generate a second if the student explicitly asks again.
+8. WHITEBOARD (PERMISSION-GATED): When explaining a reaction equation, experiment setup, safety procedure, or step-by-step process — ASK FIRST: "Do you want me to walk through this on the whiteboard?" or "Can I draw this out real quick?" Only call add_whiteboard_step after the student confirms. Build ONE step at a time. Call clear_whiteboard between experiments. Use show_media(-1) to show a previously approved diagram mid-whiteboard, then hide_media() to return.
+9. Ask questions to check understanding
+10. Keep responses conversational and concise
 
 When the student is ready to start, ask: "What experiment would you like to do today, ${name}?"
 `;
@@ -58,6 +66,8 @@ export default function LabEntry() {
   const {
     isConnected, isConnecting, isSilent, isMuted,
     currentImage, isGeneratingImage,
+    whiteboardState, completeWhiteboardStep,
+    isMediaFocused, hideMedia,
     connect, disconnect, toggleMute,
     startVideoCapture, stopVideoCapture,
   } = useGeminiLive('lab', (msgs) => {
@@ -320,8 +330,18 @@ Then wait for the user to respond before continuing.`;
           </div>
         )}
 
-        {/* AI Generated Image */}
-        {(currentImage || isGeneratingImage) && !isVideoActive && !selectedImage && (
+        {/* PRIORITY 1: Whiteboard (hidden when show_media is active) */}
+        {(whiteboardState.isActive || whiteboardState.steps.length > 0) && !isMediaFocused && !isVideoActive && !selectedImage && (
+          <div className="absolute inset-0 z-20 bg-white">
+            <WhiteboardView
+              whiteboardState={whiteboardState}
+              onStepComplete={completeWhiteboardStep}
+            />
+          </div>
+        )}
+
+        {/* PRIORITY 2: AI Generated Image / show_media focus */}
+        {(currentImage || isGeneratingImage) && !isVideoActive && !selectedImage && (isMediaFocused || !(whiteboardState.isActive || whiteboardState.steps.length > 0)) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[rgb(250,249,245)] z-10 p-6">
             {isGeneratingImage ? (
               <div className="flex flex-col items-center gap-4 text-teal-600">
@@ -331,7 +351,15 @@ Then wait for the user to respond before continuing.`;
             ) : currentImage ? (
               <div className="relative w-full max-w-md aspect-square rounded-3xl overflow-hidden shadow-xl border border-zinc-200">
                 <img src={currentImage} alt="AI Generated" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-zinc-200 shadow-sm">
+                {isMediaFocused && whiteboardState.steps.length > 0 && (
+                  <button
+                    onClick={hideMedia}
+                    className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-bold text-teal-700 border border-teal-200 shadow-sm"
+                  >
+                    <ChevronLeft size={14} /> Back to Whiteboard
+                  </button>
+                )}
+                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-zinc-200 shadow-sm">
                   <ImageIcon size={14} className="text-teal-600" />
                   <span className="text-xs font-bold text-zinc-800 uppercase tracking-wider">Visual Aid</span>
                 </div>
@@ -341,7 +369,7 @@ Then wait for the user to respond before continuing.`;
         )}
 
         {/* Default State / Mic Indicator */}
-        {!isVideoActive && !selectedImage && !currentImage && !isGeneratingImage && (
+        {!isVideoActive && !selectedImage && !currentImage && !isGeneratingImage && !(whiteboardState.isActive || whiteboardState.steps.length > 0) && (
           <div className="relative flex flex-col items-center justify-center z-10">
             {isConnected ? (
               <>
