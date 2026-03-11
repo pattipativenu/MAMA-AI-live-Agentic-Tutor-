@@ -373,7 +373,7 @@ export default function Settings() {
                     <Sparkles size={20} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className={`font-bold text-sm block ${formData.learningStyle === 'all' ? 'text-amber-900' : 'text-zinc-600'}`}>All Styles (Let Gemini Decide)</span>
+                    <span className={`font-bold text-sm block ${formData.learningStyle === 'all' ? 'text-amber-900' : 'text-zinc-600'}`}>All Styles (Let Mama AI Decide)</span>
                     <span className="text-xs text-zinc-400 font-medium">Mama AI picks the best style for each concept</span>
                   </div>
                 </button>

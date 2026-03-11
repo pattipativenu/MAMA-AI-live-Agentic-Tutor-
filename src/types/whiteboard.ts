@@ -11,6 +11,7 @@ export interface WhiteboardStep {
   status: 'pending' | 'typing' | 'complete';
   spokenText?: string;    // Accumulated transcript for this step (for audio sync)
   isSpeaking?: boolean;   // Whether AI is currently speaking this step
+  highlightedTerms?: string[]; // Terms to highlight in orange when AI references them
 }
 
 export interface WhiteboardState {

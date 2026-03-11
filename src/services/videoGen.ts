@@ -269,17 +269,24 @@ export async function startVideoGenerationJob(
   
   const jobRef = doc(db, 'videoJobs', jobId);
   
-  // Create job document
-  await setDoc(jobRef, {
+  // Build job document - filter out undefined values for Firestore
+  const jobData: Partial<VideoJob> = {
     id: jobId,
     userId,
     sessionId,
     concept,
     topicName: topicName || concept,
-    chapterId,
     status: 'pending',
     createdAt: Date.now()
-  } as VideoJob);
+  };
+  
+  // Only add chapterId if it's defined (Firestore rejects undefined values)
+  if (chapterId !== undefined && chapterId !== null) {
+    jobData.chapterId = chapterId;
+  }
+  
+  // Create job document
+  await setDoc(jobRef, jobData as VideoJob);
 
   // Start generation in background
   (async () => {

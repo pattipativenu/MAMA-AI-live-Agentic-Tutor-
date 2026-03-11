@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import 'katex/dist/katex.min.css';
 import { InlineMath } from 'react-katex';
-import { Check, Volume2 } from 'lucide-react';
+import { Volume2 } from 'lucide-react';
 
 interface WhiteboardStepProps {
   stepNumber: number;
@@ -12,9 +12,14 @@ interface WhiteboardStepProps {
   onTypingComplete?: () => void;
   isCurrent: boolean;
   isHighlighted?: boolean;
+  highlightedTerms?: string[]; // Terms to highlight in orange
 }
 
-const TYPING_SPEED_MS = 22; // ms per character
+// Natural typing speed - varies slightly for realistic effect
+const getTypingDelay = () => {
+  // Random delay between 15-35ms for natural variation
+  return Math.floor(Math.random() * 20) + 15;
+};
 
 export default function WhiteboardStep({
   stepNumber,
@@ -25,142 +30,203 @@ export default function WhiteboardStep({
   onTypingComplete,
   isCurrent,
   isHighlighted = false,
+  highlightedTerms = [],
 }: WhiteboardStepProps) {
-  const [displayedText, setDisplayedText] = useState('');
+  const [displayedMath, setDisplayedMath] = useState('');
+  const [displayedExplanation, setDisplayedExplanation] = useState('');
   const [showDecode, setShowDecode] = useState(false);
   const hasCompleted = useRef(false);
+  const mathTypedRef = useRef(false);
 
-  // Reset when status goes back to pending/typing
+  // Reset when status goes back to pending
   useEffect(() => {
     if (status === 'pending') {
-      setDisplayedText('');
+      setDisplayedMath('');
+      setDisplayedExplanation('');
       setShowDecode(false);
       hasCompleted.current = false;
+      mathTypedRef.current = false;
     }
   }, [status]);
 
   // Instant display when already complete
   useEffect(() => {
     if (status === 'complete') {
-      setDisplayedText(explanation);
+      setDisplayedMath(math);
+      setDisplayedExplanation(explanation);
       setShowDecode(true);
     }
-  }, [status, explanation]);
+  }, [status, math, explanation]);
 
-  // Self-contained typewriter animation when typing starts
+  // Natural typing animation for math formula first, then explanation
   useEffect(() => {
     if (status !== 'typing') return;
 
     hasCompleted.current = false;
-    setDisplayedText('');
+    mathTypedRef.current = false;
+    setDisplayedMath('');
+    setDisplayedExplanation('');
     setShowDecode(false);
 
-    if (!explanation) {
-      // Nothing to type — complete immediately
-      hasCompleted.current = true;
-      onTypingComplete?.();
-      return;
-    }
-
-    let index = 0;
-    const interval = setInterval(() => {
-      index++;
-      setDisplayedText(explanation.slice(0, index));
-
-      if (index >= explanation.length) {
-        clearInterval(interval);
-        setShowDecode(true);
-        if (!hasCompleted.current) {
-          hasCompleted.current = true;
-          onTypingComplete?.();
+    // Type math first, then explanation
+    let mathIndex = 0;
+    let explanationIndex = 0;
+    
+    const typeNextChar = () => {
+      // Type math formula character by character
+      if (!mathTypedRef.current && math) {
+        if (mathIndex < math.length) {
+          mathIndex++;
+          setDisplayedMath(math.slice(0, mathIndex));
+          setTimeout(typeNextChar, getTypingDelay());
+          return;
+        } else {
+          mathTypedRef.current = true;
+          // Small pause after math before starting explanation
+          setTimeout(typeNextChar, 200);
+          return;
         }
       }
-    }, TYPING_SPEED_MS);
+      
+      // Then type explanation
+      if (explanation) {
+        if (explanationIndex < explanation.length) {
+          // Type words more naturally - sometimes 1 char, sometimes 2-3
+          const chunkSize = Math.random() > 0.7 ? 2 : 1;
+          explanationIndex = Math.min(explanationIndex + chunkSize, explanation.length);
+          setDisplayedExplanation(explanation.slice(0, explanationIndex));
+          setTimeout(typeNextChar, getTypingDelay());
+          return;
+        }
+      }
+      
+      // Typing complete
+      setShowDecode(true);
+      if (!hasCompleted.current) {
+        hasCompleted.current = true;
+        onTypingComplete?.();
+      }
+    };
 
-    return () => clearInterval(interval);
-  }, [status]); // Only re-run when status changes to 'typing'
+    // Start typing
+    typeNextChar();
 
-  const getBorderColor = () => {
-    if (isHighlighted) return 'border-amber-500 ring-4 ring-amber-200';
-    if (status === 'complete') return 'border-zinc-200';
-    if (status === 'typing') return 'border-amber-400 ring-2 ring-amber-100';
-    return 'border-zinc-100';
-  };
-
-  const getBgColor = () => {
-    if (isHighlighted) return 'bg-amber-50/60';
-    if (status === 'complete') return 'bg-zinc-50/50';
-    return 'bg-white';
-  };
-
-  const getOpacity = () => {
-    if (status === 'pending') return 'opacity-40';
-    return 'opacity-100';
-  };
-
-  const showMath = status !== 'pending';
+    return () => {
+      // Cleanup handled by the recursive timeout pattern
+    };
+  }, [status, math, explanation]); // Re-run when status changes to 'typing'
 
   const renderMath = () => {
     if (!math) {
       return <span className="text-zinc-400 italic text-sm">Formula loading...</span>;
     }
-    return <InlineMath math={math} errorColor="#dc2626" />;
+    return <InlineMath math={displayedMath || math} errorColor="#dc2626" />;
+  };
+
+  // Render explanation with orange highlighting for key terms
+  const renderExplanation = (text: string) => {
+    if (!highlightedTerms || highlightedTerms.length === 0) {
+      return text;
+    }
+
+    // Create a regex pattern that matches any of the highlighted terms
+    const pattern = new RegExp(`(${highlightedTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+    
+    const parts = text.split(pattern);
+    return parts.map((part, i) => {
+      const isHighlighted = highlightedTerms.some(term => 
+        part.toLowerCase() === term.toLowerCase()
+      );
+      
+      if (isHighlighted) {
+        return (
+          <span key={i} className="text-amber-600 font-semibold bg-amber-100/50 px-1 rounded">
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
+  };
+
+  // Determine styling based on state
+  const getContainerClasses = () => {
+    const baseClasses = "relative transition-all duration-500 ease-out";
+    
+    if (isHighlighted) {
+      return `${baseClasses} bg-amber-50/80 border-l-4 border-amber-500 pl-4 py-3 pr-3 rounded-r-xl`;
+    }
+    
+    if (status === 'complete') {
+      return `${baseClasses} border-l-2 border-zinc-200 pl-4 py-2 pr-3 opacity-70 hover:opacity-100 transition-opacity`;
+    }
+    
+    if (status === 'typing') {
+      return `${baseClasses} border-l-2 border-amber-400 pl-4 py-3 pr-3`;
+    }
+    
+    return `${baseClasses} border-l-2 border-zinc-100 pl-4 py-2 pr-3 opacity-40`;
   };
 
   return (
-    <div
-      className={`relative rounded-xl border-2 p-4 transition-all duration-300 ${getBorderColor()} ${getBgColor()} ${getOpacity()}`}
-    >
-      {/* Step number badge */}
-      <div className="absolute -top-3 left-4 flex items-center gap-1.5">
-        <div className={`px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1.5 ${
+    <div className={getContainerClasses()}>
+      {/* Step indicator - small and subtle */}
+      <div className="absolute -left-2.5 top-3 flex items-center justify-center">
+        <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-300 ${
           isHighlighted
-            ? 'bg-amber-500 text-white'
+            ? 'bg-amber-500 text-white scale-110 shadow-md'
             : status === 'complete'
-              ? 'bg-green-100 text-green-700'
+              ? 'bg-zinc-200 text-zinc-500'
               : status === 'typing'
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-zinc-100 text-zinc-500'
+                ? 'bg-amber-400 text-white animate-pulse'
+                : 'bg-zinc-100 text-zinc-300'
         }`}>
-          {status === 'complete' && !isHighlighted ? (
-            <Check size={12} />
-          ) : status === 'typing' ? (
-            <Volume2 size={12} className="animate-pulse" />
-          ) : null}
-          Step {stepNumber}
+          {status === 'typing' ? (
+            <Volume2 size={10} className="animate-pulse" />
+          ) : (
+            stepNumber
+          )}
         </div>
       </div>
 
-      <div className="mt-2 space-y-3">
-        {/* Math formula */}
-        <div className={`bg-white rounded-lg p-3 border transition-all duration-300 ${
-          showMath ? 'border-zinc-200 opacity-100' : 'border-zinc-100 opacity-0'
-        }`}>
-          <div className="text-zinc-800 text-lg overflow-x-auto">
-            {showMath ? renderMath() : <span className="text-zinc-300">...</span>}
+      <div className="space-y-2">
+        {/* Math formula - appears as if being written */}
+        {math && (
+          <div className={`text-zinc-800 text-lg overflow-x-auto transition-opacity duration-300 ${
+            displayedMath || status === 'complete' ? 'opacity-100' : 'opacity-0'
+          }`}>
+            {renderMath()}
+            {status === 'typing' && displayedMath.length < math.length && (
+              <span className="inline-block w-0.5 h-5 bg-amber-500 ml-0.5 animate-pulse align-middle" />
+            )}
           </div>
-        </div>
+        )}
 
-        {/* Explanation text — typewriter */}
+        {/* Explanation text - typewriter style with natural flow and orange highlighting */}
         {explanation && (
-          <p className="text-zinc-600 text-sm leading-relaxed min-h-[1.5em]">
-            {displayedText}
-            {status === 'typing' && displayedText.length < explanation.length && (
-              <span className="inline-block w-0.5 h-4 bg-amber-500 ml-0.5 animate-pulse" />
+          <p className="text-zinc-600 text-sm leading-relaxed">
+            {renderExplanation(displayedExplanation)}
+            {status === 'typing' && displayedExplanation.length < explanation.length && (
+              <span className="inline-block w-0.5 h-4 bg-amber-500 ml-0.5 animate-pulse align-middle" />
             )}
           </p>
         )}
 
-        {/* Decode — appears after typing */}
+        {/* Decode/Note - appears after typing with subtle animation */}
         {decode && (
           <div className={`text-xs transition-all duration-500 ${
             showDecode ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
           }`}>
-            <span className="text-amber-600 font-semibold">💡 What this means: </span>
+            <span className="text-amber-600 font-semibold">Note: </span>
             <span className="text-zinc-500">{decode}</span>
           </div>
         )}
       </div>
+
+      {/* Highlight overlay for referenced steps */}
+      {isHighlighted && (
+        <div className="absolute inset-0 bg-amber-100/20 rounded-r-xl animate-pulse pointer-events-none" />
+      )}
     </div>
   );
 }
