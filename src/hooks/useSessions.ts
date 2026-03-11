@@ -69,6 +69,16 @@ export interface SavedSession {
   mediaCount: number;
   evaluation?: SessionEvaluation;
   generationJob?: GenerationJob;
+  generatedMedia?: GeneratedMedia[]; // NEW: Store generated images/videos
+}
+
+// Re-export GeneratedMedia for convenience
+export interface GeneratedMedia {
+  type: 'image' | 'video';
+  url: string;
+  prompt?: string;
+  timestamp: number;
+  caption?: string;
 }
 
 export function useSessions() {
@@ -104,19 +114,23 @@ export function useSessions() {
   }, [currentUser]);
 
   /**
-   * Deduplicate sessions based on mode + first user message similarity
+   * Deduplicate sessions based on session ID
+   * FIXED: Previously used mode + first message content which caused different sessions
+   * with the same greeting (e.g., "Hi") to be incorrectly deduplicated.
+   * Now uses unique session ID to ensure all distinct sessions are preserved.
    */
   const deduplicateSessions = (sessionList: SavedSession[]): SavedSession[] => {
     const seen = new Map<string, SavedSession>();
     
     for (const session of sessionList) {
-      const firstUserMsg = session.messages.find(m => m.role === 'user')?.text || '';
-      const key = `${session.mode}-${firstUserMsg.slice(0, 100)}`;
+      // FIX: Use session ID as the unique key instead of message content
+      // This prevents sessions with similar greetings from being incorrectly merged
+      const key = session.id;
       
       if (!seen.has(key)) {
         seen.set(key, session);
       } else {
-        // Keep the one with more messages (more complete session)
+        // If same ID exists, keep the one with more messages (more complete session)
         const existing = seen.get(key)!;
         if (session.messages.length > existing.messages.length) {
           seen.set(key, session);
@@ -128,21 +142,29 @@ export function useSessions() {
   };
 
   /**
-   * Check if this would be a duplicate of a recent session
+   * Check if this would be a duplicate of a very recent session (within last 2 minutes)
+   * FIXED: Now only considers it a duplicate if it's the same session ID or 
+   * happened extremely recently (prevents accidental double-saves)
    */
   const isDuplicateSession = (
     mode: 'lab' | 'exam' | 'tutor',
     messages: SessionMessage[]
   ): boolean => {
-    const firstUserMsg = messages.find(m => m.role === 'user')?.text || '';
-    if (!firstUserMsg) return false;
+    const now = Date.now();
     
-    const key = `${mode}-${firstUserMsg.slice(0, 100)}`;
-    
-    for (const session of sessions.slice(0, 5)) {
-      const sessionFirstMsg = session.messages.find(m => m.role === 'user')?.text || '';
-      if (`${session.mode}-${sessionFirstMsg.slice(0, 100)}` === key) {
-        return true;
+    // Only check the most recent 3 sessions
+    for (const session of sessions.slice(0, 3)) {
+      // If a session with the same ID exists, it's a duplicate
+      // Or if a session happened within the last 2 minutes with same mode
+      const isRecent = (now - session.date) < 2 * 60 * 1000; // 2 minutes
+      if (session.mode === mode && isRecent) {
+        // Check if first message is identical (strong indicator of duplicate)
+        const sessionFirstMsg = session.messages.find(m => m.role === 'user')?.text || '';
+        const newFirstMsg = messages.find(m => m.role === 'user')?.text || '';
+        if (sessionFirstMsg === newFirstMsg && sessionFirstMsg.length > 0) {
+          console.log('[useSessions] Duplicate detected: same mode, recent, identical first message');
+          return true;
+        }
       }
     }
     
@@ -151,12 +173,14 @@ export function useSessions() {
 
   /**
    * Save a session with exact speech-to-text, proper filtering, and smart heading
+   * NEW: Now includes generatedMedia (images/videos) in the saved session
    */
   const saveSession = async (
     mode: 'lab' | 'exam' | 'tutor',
     rawMessages: SessionMessage[],
     sessionId?: string,
-    evaluation?: SessionEvaluation
+    evaluation?: SessionEvaluation,
+    generatedMedia?: GeneratedMedia[]
   ): Promise<string | null> => {
     console.log('[useSessions] saveSession called with', rawMessages.length, 'messages, mode:', mode);
     
@@ -207,6 +231,7 @@ export function useSessions() {
       whiteboardUsed,
       mediaCount,
       ...(evaluation ? { evaluation } : {}),
+      ...(generatedMedia && generatedMedia.length > 0 ? { generatedMedia } : {}),
     };
 
     // Save to Firestore

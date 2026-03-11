@@ -180,10 +180,10 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Books & Subjects */}
+      {/* Subjects */}
       <section className="mt-2">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-zinc-900 tracking-tight">Books &amp; Subjects</h2>
+          <h2 className="text-lg font-bold text-zinc-900 tracking-tight">Subjects</h2>
           <button
             onClick={() => navigate('/study')}
             className="text-sm font-bold text-amber-600 hover:text-amber-700 flex items-center gap-1"

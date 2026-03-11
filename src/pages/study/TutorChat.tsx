@@ -8,7 +8,6 @@ import { GoogleGenAI } from '@google/genai';
 import { useGeminiLive, GeneratedMedia } from '../../hooks/useGeminiLive';
 import { useSessions, SessionMessage } from '../../hooks/useSessions';
 import { WhiteboardView } from '../../components/whiteboard';
-import ThinkingIndicator from '../../components/ThinkingIndicator';
 import { playModeEntrySound } from '../../utils/sound';
 
 type ContentPart = { type: 'text'; text: string } | { type: 'image'; url: string };
@@ -326,9 +325,9 @@ export default function TutorChat() {
         hideMedia,
     } = useGeminiLive(
         'tutor',
-        (msgs) => {
-            // Save to Firestore as tutor mode
-            saveSession('tutor', msgs);
+        (msgs, media) => {
+            // Save to Firestore as tutor mode (now includes generated media)
+            saveSession('tutor', msgs, undefined, undefined, media);
             // Also sync to chat messages so user sees conversation when returning to chat
             if (msgs.length > 0) {
                 const chatMsgs: ChatMessage[] = msgs.map(m => ({
@@ -1038,13 +1037,6 @@ ${answersContent}
                         )}
                     </div>
                 </main>
-
-                {/* Thinking Indicator - Shows when AI is processing */}
-                {status === 'thinking' && (
-                    <div className="absolute bottom-[180px] left-0 right-0 flex justify-center z-30 pointer-events-none">
-                        <ThinkingIndicator isVisible={true} text="Thinking" />
-                    </div>
-                )}
 
                 {/* Media Gallery Bar - Above Bottom Controls */}
                 {generatedMedia.length > 0 && (

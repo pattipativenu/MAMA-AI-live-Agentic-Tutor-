@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mic, MicOff, Camera, X, Video, VideoOff, Image as ImageIcon, Loader2, ChevronLeft } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { WhiteboardView } from '../../components/whiteboard';
-import ThinkingIndicator from '../../components/ThinkingIndicator';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useSessions, SessionMessage } from '../../hooks/useSessions';
 import { playModeEntrySound } from '../../utils/sound';
@@ -74,8 +73,8 @@ export default function LabEntry() {
     startVideoCapture, stopVideoCapture,
   } = useGeminiLive(
     'lab', 
-    (msgs) => {
-      saveSession('lab', msgs, sessionIdRef.current);
+    (msgs, media) => {
+      saveSession('lab', msgs, sessionIdRef.current, undefined, media);
     },
     profile?.voiceName || 'Victoria'
   );
@@ -305,13 +304,6 @@ Then wait for the user to respond before continuing.`;
 
       {/* Main Visual Area */}
       <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6">
-        
-        {/* Thinking Indicator - Shows when AI is processing */}
-        {status === 'thinking' && (
-          <div className="absolute top-20 left-0 right-0 flex justify-center z-30 pointer-events-none">
-            <ThinkingIndicator isVisible={true} text="Thinking" />
-          </div>
-        )}
 
         {/* Video Feed — always in DOM so videoRef is valid when startVideo() sets srcObject */}
         <div className={`absolute inset-0 transition-opacity duration-300 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>

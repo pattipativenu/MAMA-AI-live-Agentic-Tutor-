@@ -195,7 +195,7 @@ export default function StudyLibrary() {
             />
 
             {/* Library Grid */}
-            <h2 className="text-lg font-bold text-zinc-800 mb-4">Books & Subjects</h2>
+            <h2 className="text-lg font-bold text-zinc-800 mb-4">Subjects</h2>
 
             {isLoadingBooks ? (
                 <div className="flex items-center justify-center py-12">

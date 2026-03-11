@@ -25,14 +25,25 @@ export default function Summary() {
       setLoading(false);
       return;
     }
+    
+    // Safety timeout: don't wait forever for session
+    const timeoutId = setTimeout(() => {
+      console.log('[Summary] Session load timeout - showing not found');
+      setLoading(false);
+    }, 10000); // 10 second timeout
+    
     const unsubscribe = subscribeToSession(uid, sessionId, (s) => {
       if (s) {
+        clearTimeout(timeoutId);
         setSession(s);
         setLoading(false);
       }
       // If null, keep loading=true and wait — the save is still in flight
     });
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      unsubscribe();
+    };
   }, [currentUser?.uid, sessionId]);
 
   // ── Derived data ────────────────────────────────────────────────────────
