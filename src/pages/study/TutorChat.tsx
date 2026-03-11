@@ -8,6 +8,7 @@ import { GoogleGenAI } from '@google/genai';
 import { useGeminiLive, GeneratedMedia } from '../../hooks/useGeminiLive';
 import { useSessions, SessionMessage } from '../../hooks/useSessions';
 import { WhiteboardView } from '../../components/whiteboard';
+import ThinkingIndicator from '../../components/ThinkingIndicator';
 import { playModeEntrySound } from '../../utils/sound';
 
 type ContentPart = { type: 'text'; text: string } | { type: 'image'; url: string };
@@ -308,6 +309,7 @@ export default function TutorChat() {
         isConnected,
         isConnecting,
         isMuted,
+        status,
         statusDisplay,
         currentImage,
         generatedMedia,
@@ -341,6 +343,34 @@ export default function TutorChat() {
     const [voiceMode, setVoiceMode] = useState(false);
     const [selectedMedia, setSelectedMedia] = useState<GeneratedMedia | null>(null);
     const [isPlayingVideo, setIsPlayingVideo] = useState(false);
+    const mediaGalleryRef = useRef<HTMLDivElement>(null);
+    const prevMediaLengthRef = useRef(0);
+
+    // Auto-scroll and auto-expand new images when autoAdvanceCarousel is enabled
+    useEffect(() => {
+        const autoAdvance = profile?.autoAdvanceCarousel ?? true;
+        
+        // Check if new media was added
+        if (generatedMedia.length > prevMediaLengthRef.current) {
+            const newMedia = generatedMedia[generatedMedia.length - 1];
+            
+            // Auto-scroll to media gallery
+            if (mediaGalleryRef.current) {
+                mediaGalleryRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            
+            // Auto-expand the new media if auto-advance is enabled
+            if (autoAdvance && voiceMode) {
+                // Small delay to let the thumbnail render first
+                const timer = setTimeout(() => {
+                    setSelectedMedia(newMedia);
+                }, 500);
+                return () => clearTimeout(timer);
+            }
+        }
+        
+        prevMediaLengthRef.current = generatedMedia.length;
+    }, [generatedMedia, profile?.autoAdvanceCarousel, voiceMode]);
     
     // Camera state
     const [cameraImage, setCameraImage] = useState<string | null>(null);
@@ -1009,9 +1039,16 @@ ${answersContent}
                     </div>
                 </main>
 
+                {/* Thinking Indicator - Shows when AI is processing */}
+                {status === 'thinking' && (
+                    <div className="absolute bottom-[180px] left-0 right-0 flex justify-center z-30 pointer-events-none">
+                        <ThinkingIndicator isVisible={true} text="Thinking" />
+                    </div>
+                )}
+
                 {/* Media Gallery Bar - Above Bottom Controls */}
                 {generatedMedia.length > 0 && (
-                    <div className="bg-white border-t border-zinc-200 px-4 py-3 z-20">
+                    <div ref={mediaGalleryRef} className="bg-white border-t border-zinc-200 px-4 py-3 z-20">
                         <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide pb-1">
                             <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider shrink-0 bg-zinc-100 px-2 py-1 rounded-lg">
                                 Generated ({generatedMedia.length})

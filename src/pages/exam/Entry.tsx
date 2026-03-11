@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { WhiteboardView } from '../../components/whiteboard';
+import ThinkingIndicator from '../../components/ThinkingIndicator';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSessions, SessionMessage } from '../../hooks/useSessions';
@@ -122,14 +123,19 @@ export default function ExamEntry() {
 
   const {
     isConnected, isConnecting, isSilent, isMuted,
+    status,
     messages, currentImage, isGeneratingImage,
     whiteboardState, completeWhiteboardStep,
     isMediaFocused, hideMedia,
     connect, disconnect, toggleMute, sendClientMessage,
     startVideoCapture, stopVideoCapture,
-  } = useGeminiLive('exam', (msgs) => {
-    saveSession('exam', msgs, sessionIdRef.current);
-  });
+  } = useGeminiLive(
+    'exam', 
+    (msgs) => {
+      saveSession('exam', msgs, sessionIdRef.current);
+    },
+    profile?.voiceName || 'Victoria'
+  );
 
   // Live camera state for exam mode (optional vision)
   const [isVideoActive, setIsVideoActive] = useState(false);
@@ -514,6 +520,13 @@ Then wait for the user to respond before continuing.`;
 
       {/* ── Main Visual Area ─────────────────────────────────────────────── */}
       <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6 pt-24">
+
+        {/* Thinking Indicator - Shows when AI is processing */}
+        {status === 'thinking' && (
+          <div className="absolute top-20 left-0 right-0 flex justify-center z-30 pointer-events-none">
+            <ThinkingIndicator isVisible={true} text="Thinking" />
+          </div>
+        )}
 
         {/* Live Video Feed (when camera is active) */}
         {isVideoActive && (

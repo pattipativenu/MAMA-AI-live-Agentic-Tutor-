@@ -423,7 +423,7 @@ export function useGeminiLive(
         model: liveModel,
         config: {
           tools: [{ functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration, showMediaDeclaration, hideMediaDeclaration] }],
-          responseModalities: [Modality.AUDIO],
+          responseModalities: [Modality.AUDIO, Modality.TEXT],
           speechConfig: {
             voiceConfig: { 
               prebuiltVoiceConfig: { 
@@ -548,6 +548,11 @@ export function useGeminiLive(
                 if (call.name === 'add_whiteboard_step') {
                   const args = call.args as any;
                   console.log('[GeminiLive] add_whiteboard_step called:', args.math);
+                  
+                  // CRITICAL: Close any open images/videos when whiteboard starts
+                  // This ensures the whiteboard is visible when AI says "Let me explain on the whiteboard"
+                  setCurrentImage(null);
+                  setIsMediaFocused(false);
                   
                   // Add whiteboard step to messages for session tracking
                   updateMessages(prev => {
@@ -787,10 +792,10 @@ export function useGeminiLive(
                   if (!isDuplicate) {
                     updateMessages(prev => {
                       const last = prev[prev.length - 1];
-                      if (last && last.role === 'ai') {
-                        return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + part.text }];
+                      if (last && last.role === 'ai' && (now - (last.timestamp || 0)) < 3000) {
+                        return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + part.text, timestamp: now }];
                       }
-                      return [...prev, { role: 'ai', text: part.text }];
+                      return [...prev, { role: 'ai', text: part.text, timestamp: now }];
                     });
                     lastAiMessageRef.current = { text: part.text, timestamp: now };
                   }
@@ -823,19 +828,27 @@ export function useGeminiLive(
               setStatus('thinking');
               currentAiTextRef.current = '';
               
-              updateMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last && last.role === 'user') {
-                  return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + inputTranscript }];
-                }
-                return [...prev, { role: 'user', text: inputTranscript }];
-              });
+              // Track last transcript to prevent duplicates
+              const now = Date.now();
+              const isDuplicate = lastAiMessageRef.current?.text === inputTranscript && 
+                                 (now - (lastAiMessageRef.current?.timestamp || 0)) < 2000;
+              
+              if (!isDuplicate) {
+                updateMessages(prev => {
+                  const last = prev[prev.length - 1];
+                  // Only append if the last message was very recent (within 3 seconds)
+                  if (last && last.role === 'user' && (now - (last.timestamp || 0)) < 3000) {
+                    return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + inputTranscript, timestamp: now }];
+                  }
+                  return [...prev, { role: 'user', text: inputTranscript, timestamp: now }];
+                });
+              }
             }
 
             // @ts-ignore
             const outputTranscript = message.serverContent?.outputAudioTranscription?.text || message.outputAudioTranscription?.text;
             if (outputTranscript) {
-              console.log("[GeminiLive] AI Transcript:", outputTranscript);
+              console.log("[GeminiLive] AI Transcript from audio:", outputTranscript);
               currentAiTextRef.current += ' ' + outputTranscript;
               
               // Detect smart status based on accumulated text
@@ -939,10 +952,10 @@ export function useGeminiLive(
                 if (!isDuplicate) {
                   updateMessages(prev => {
                     const last = prev[prev.length - 1];
-                    if (last && last.role === 'ai') {
-                      return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + cleanText }];
+                    if (last && last.role === 'ai' && (now - (last.timestamp || 0)) < 3000) {
+                      return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + cleanText, timestamp: now }];
                     }
-                    return [...prev, { role: 'ai', text: cleanText }];
+                    return [...prev, { role: 'ai', text: cleanText, timestamp: now }];
                   });
                   lastAiMessageRef.current = { text: cleanText, timestamp: now };
                 }
