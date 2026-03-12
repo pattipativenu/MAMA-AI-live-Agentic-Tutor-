@@ -115,7 +115,9 @@ export function useGeminiLive(
   // Track last AI message addition to prevent duplicates between text parts and audio transcription
   const lastAiMessageRef = useRef<{ text: string; timestamp: number } | null>(null);
 
-  // Silence detection for audioStreamEnd (Gemini docs: send audioStreamEnd after 1s of silence)
+  // Silence detection for audioStreamEnd (Gemini docs requirement).
+  // SILENCE_FRAMES_BEFORE_END is intentionally large (600 frames ≈ 2.5 min)
+  // to prevent premature sends on phone mics with consistently low RMS.
   const silentFrameCountRef = useRef(0);
   const audioStreamEndSentRef = useRef(false);
   const SILENCE_THRESHOLD = 0.005;
