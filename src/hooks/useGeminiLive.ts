@@ -90,9 +90,6 @@ export function useGeminiLive(
   // Audio playback state
   const playbackContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  
-  // TTS audio analyser for visualization (GlobeVisualizer)
-  const ttsAnalyserRef = useRef<AnalyserNode | null>(null);
 
   // Guard to prevent double connection
   const isConnectingRef = useRef(false);
@@ -338,12 +335,6 @@ export function useGeminiLive(
       const playbackContext = new AudioContextClass({ sampleRate: 24000 });
       playbackContextRef.current = playbackContext;
       nextPlayTimeRef.current = playbackContext.currentTime;
-      
-      // Create TTS analyser for visualization (GlobeVisualizer)
-      const analyser = playbackContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.6;
-      ttsAnalyserRef.current = analyser;
 
       // 2. Get Microphone Access
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1006,14 +997,7 @@ export function useGeminiLive(
 
                     const source = playbackContextRef.current.createBufferSource();
                     source.buffer = audioBuffer;
-                    
-                    // Chain: source -> analyser (for visualization) -> destination
-                    if (ttsAnalyserRef.current) {
-                      source.connect(ttsAnalyserRef.current);
-                      ttsAnalyserRef.current.connect(playbackContextRef.current.destination);
-                    } else {
-                      source.connect(playbackContextRef.current.destination);
-                    }
+                    source.connect(playbackContextRef.current.destination);
 
                     const startTime = Math.max(playbackContextRef.current.currentTime, nextPlayTimeRef.current);
                     source.start(startTime);
@@ -1431,9 +1415,6 @@ export function useGeminiLive(
     generatedMedia,
     currentMediaIndex,
     whiteboardState,
-    // Audio visualization refs for GlobeVisualizer
-    audioStream: mediaStreamRef.current,
-    ttsAnalyser: ttsAnalyserRef.current,
     connect,
     disconnect,
     toggleMute,

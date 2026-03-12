@@ -6,7 +6,6 @@ import { useProfile } from '../../hooks/useProfile';
 import { useAuth } from '../../contexts/AuthContext';
 import { GoogleGenAI } from '@google/genai';
 import { useGeminiLive, GeneratedMedia } from '../../hooks/useGeminiLive';
-import GlobeVisualizer, { GlobeState } from '../../components/GlobeVisualizer';
 import { useSessions, SessionMessage } from '../../hooks/useSessions';
 import { WhiteboardView } from '../../components/whiteboard';
 import { playModeEntrySound } from '../../utils/sound';
@@ -329,8 +328,6 @@ export default function TutorChat() {
         generatedMedia,
         isGeneratingImage,
         whiteboardState,
-        audioStream,
-        ttsAnalyser,
         connect,
         disconnect,
         toggleMute,
@@ -357,36 +354,11 @@ export default function TutorChat() {
         profile?.voiceName || 'Victoria'
     );
 
-    // Map VoiceStatus to GlobeState for the 3D visualizer
-    const getGlobeState = useCallback((): GlobeState => {
-        if (isMuted) return 'IDLE';
-        switch (status) {
-            case 'listening': return 'LISTENING';
-            case 'thinking': return 'IDLE'; // Skip thinking animation, just show idle
-            case 'explaining':
-            case 'clarifying':
-            case 'asking':
-            case 'whiteboard':
-            case 'referencing': return 'SPEAKING';
-            case 'creating-visual':
-            case 'creating-video': return 'IDLE';
-            default: return 'IDLE';
-        }
-    }, [status, isMuted]);
-
     const [voiceMode, setVoiceMode] = useState(false);
     const [selectedMedia, setSelectedMedia] = useState<GeneratedMedia | null>(null);
     const [isPlayingVideo, setIsPlayingVideo] = useState(false);
     const mediaGalleryRef = useRef<HTMLDivElement>(null);
     const prevMediaLengthRef = useRef(0);
-
-    // Debug: Log when generatedMedia changes
-    useEffect(() => {
-        console.log('[TutorChat] generatedMedia updated:', generatedMedia.length, 'items');
-        generatedMedia.forEach((m, i) => {
-            console.log(`  [${i}] ${m.type}: ${m.url.substring(0, 50)}...`);
-        });
-    }, [generatedMedia]);
 
     // Auto-scroll and auto-expand new images when autoAdvanceCarousel is enabled
     useEffect(() => {
@@ -395,7 +367,6 @@ export default function TutorChat() {
         // Check if new media was added
         if (generatedMedia.length > prevMediaLengthRef.current) {
             const newMedia = generatedMedia[generatedMedia.length - 1];
-            console.log('[TutorChat] New media added:', newMedia.type, newMedia.url.substring(0, 50));
             
             // Auto-scroll to media gallery
             if (mediaGalleryRef.current) {
@@ -1040,33 +1011,37 @@ ${answersContent}
                                         <p className="text-lg font-bold text-zinc-700">{statusDisplay.text}</p>
                                     </div>
                                 ) : (
-                                    /* Globe Visualizer - 3D audio-reactive sphere */
-                                    <div className="flex flex-col items-center justify-center">
-                                        <div className="relative w-64 h-64 flex items-center justify-center">
-                                            <GlobeVisualizer 
-                                                state={getGlobeState()}
-                                                audioStream={audioStream}
-                                                ttsAudio={null}
-                                                ttsAnalyser={ttsAnalyser}
-                                                size={160}
-                                            />
-                                            {/* Mute indicator overlay */}
-                                            {isMuted && (
-                                                <div className="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-sm rounded-full">
-                                                    <MicOff size={48} className="text-zinc-500" />
-                                                </div>
-                                            )}
+                                    /* No visual - show mic in center */
+                                    <>
+                                        {/* Status indicator with dynamic color */}
+                                        <div className={`absolute w-48 h-48 rounded-full animate-ping ${statusDisplay.color === 'green' ? 'bg-green-500/10' : statusDisplay.color === 'blue' ? 'bg-blue-500/10' : statusDisplay.color === 'orange' ? 'bg-orange-500/10' : 'bg-amber-500/10'}`} />
+                                        <div className={`absolute w-64 h-64 rounded-full animate-pulse ${statusDisplay.color === 'green' ? 'bg-green-500/5' : statusDisplay.color === 'blue' ? 'bg-blue-500/5' : statusDisplay.color === 'orange' ? 'bg-orange-500/5' : 'bg-amber-500/5'}`} />
+                                        
+                                        {/* Main mic indicator */}
+                                        <div className={`relative z-10 w-32 h-32 rounded-full flex items-center justify-center shadow-2xl transition-all duration-500 ${
+                                            isMuted 
+                                                ? 'bg-zinc-200 text-zinc-500 shadow-zinc-200/50' 
+                                                : statusDisplay.color === 'green'
+                                                    ? 'bg-green-500 text-white shadow-green-500/50 scale-110'
+                                                    : statusDisplay.color === 'blue'
+                                                        ? 'bg-blue-500 text-white shadow-blue-500/50'
+                                                        : statusDisplay.color === 'orange'
+                                                            ? 'bg-orange-500 text-white shadow-orange-500/50'
+                                                            : 'bg-amber-500 text-white shadow-amber-500/50'
+                                        }`}>
+                                            {isMuted ? <MicOff size={48} /> : <Mic size={48} />}
                                         </div>
-                                        {/* Status text below globe */}
-                                        <p className={`mt-4 text-xl font-bold tracking-wide transition-colors duration-300 text-center px-4 ${
-                                            statusDisplay.color === 'green' ? 'text-emerald-600' : 
+                                        
+                                        {/* Status text below mic */}
+                                        <p className={`mt-8 text-xl font-bold tracking-wide transition-colors duration-300 text-center px-4 ${
+                                            statusDisplay.color === 'green' ? 'text-green-600' : 
                                             statusDisplay.color === 'blue' ? 'text-blue-600' :
                                             statusDisplay.color === 'orange' ? 'text-orange-600' :
                                             'text-zinc-900'
                                         }`}>
                                             {statusDisplay.text}
                                         </p>
-                                    </div>
+                                    </>
                                 )}
                             </>
                         ) : (
