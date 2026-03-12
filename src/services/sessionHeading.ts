@@ -225,9 +225,14 @@ export function filterSystemMessages(messages: SessionMessage[]): SessionMessage
 export function hasUserCommunication(messages: SessionMessage[]): boolean {
   const nonSystemMessages = filterSystemMessages(messages);
   const userMessages = nonSystemMessages.filter(m => m.role === 'user');
-  
-  // Must have at least one user message with actual content (any non-empty text)
-  return userMessages.some(m => m.text.trim().length > 0);
+  const aiMessages = nonSystemMessages.filter(m => m.role === 'ai');
+
+  // Primary: has user speech (transcription arrived)
+  if (userMessages.some(m => m.text.trim().length > 0)) return true;
+
+  // Fallback: AI spoke 4+ times = real session definitely happened
+  // (Gemini inputAudioTranscription may have failed but conversation was real)
+  return aiMessages.length >= 4;
 }
 
 /**

@@ -119,8 +119,7 @@ export function useGeminiLive(
   const silentFrameCountRef = useRef(0);
   const audioStreamEndSentRef = useRef(false);
   const SILENCE_THRESHOLD = 0.005;
-  // ~1 second of silence at 16kHz with 4096 buffer = ~4 frames
-  const SILENCE_FRAMES_BEFORE_END = 4;
+  const SILENCE_FRAMES_BEFORE_END = 600; // ~2.5 min — prevents premature audioStreamEnd on phone mic
 
   // Session duration tracking
   const sessionStartTimeRef = useRef<number>(0);
