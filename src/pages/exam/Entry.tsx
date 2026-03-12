@@ -68,7 +68,7 @@ CRITICAL EXAM RULES:
 
 4. CORRECT & EXPLAIN: When correcting, ALWAYS start with a simple, relatable real-world example tailored to their interests or hobbies BEFORE introducing the formal scientific language or formula. This anchors the concept in something they already understand.
 
-5. VISUAL AIDS (AUTOMATIC): When introducing a new concept, correcting a mistake, or explaining a process — generate images automatically without asking. Generate 2–3 connected images per topic (overview, detail, real-world application). Call generate_image 2–3 times in sequence. Tailor visual complexity to their age.
+5. VISUAL AIDS (AUTOMATIC): When introducing a new concept, correcting a mistake, or explaining a process — generate images automatically without asking. Generate 2–3 connected images per topic (overview, detail, real-world application). Call generate_image 2–3 times in sequence. Tailor visual complexity to their age. Generate images only once per new topic — do not regenerate images for the same topic if images have already been generated for it.
 
 6. VIDEO (PERMISSION-GATED): Before calling generate_video, ALWAYS ask the student first — e.g. "Do you want me to create a video animation so you can understand this better?" or "Want me to animate this for you?" Only call generate_video after the student gives a positive response. Once granted, generate ONE video. Only generate a second if the student explicitly asks again.
 
@@ -647,7 +647,7 @@ Then wait for the user to respond before continuing.`;
               className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 border-white/40 hover:border-white/80 transition-colors"
             >
               {media.type === 'image' ? (
-                <img src={media.url} alt={`Generated ${idx + 1}`} className="w-full h-full object-cover" />
+                <img src={media.url} alt={`Generated ${idx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               ) : (
                 <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
                   <span className="text-white text-xs">▶</span>
@@ -714,25 +714,30 @@ Then wait for the user to respond before continuing.`;
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
           onClick={() => setSelectedMedia(null)}
         >
-          {selectedMedia.type === 'image' ? (
-            <img
-              src={selectedMedia.url}
-              alt="Generated visual"
-              className="max-w-full max-h-full object-contain p-4"
-            />
-          ) : (
-            <video
-              src={selectedMedia.url}
-              autoPlay
-              controls
-              className="max-w-full max-h-full p-4"
-            />
-          )}
+          <div onClick={(e) => e.stopPropagation()} className="max-w-full max-h-full flex items-center justify-center">
+            {selectedMedia.type === 'image' ? (
+              <img
+                src={selectedMedia.url}
+                alt="Generated visual"
+                className="max-w-full max-h-full object-contain p-4"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <video
+                src={selectedMedia.url}
+                autoPlay
+                playsInline
+                muted
+                controls
+                className="max-w-full max-h-full p-4"
+              />
+            )}
+          </div>
           <button
             className="absolute top-4 right-4 text-white text-2xl bg-black/50 rounded-full w-10 h-10 flex items-center justify-center"
             onClick={() => setSelectedMedia(null)}
           >
-            ✕
+            <X size={20} />
           </button>
         </div>
       )}
