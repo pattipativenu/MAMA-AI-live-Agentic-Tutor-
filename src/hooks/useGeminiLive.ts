@@ -964,9 +964,8 @@ export function useGeminiLive(
                   const now = Date.now();
                   const recentText = lastAiMessageRef.current?.text || '';
                   const isDuplicate = recentText && (
-                    recentText.includes(part.text) || 
-                    part.text.includes(recentText) ||
-                    (now - (lastAiMessageRef.current?.timestamp || 0) < 1000)
+                    recentText.includes(part.text) ||
+                    part.text.includes(recentText)
                   );
                   
                   if (!isDuplicate) {
