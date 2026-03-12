@@ -136,6 +136,9 @@ export function useGeminiLive(
     });
   }, []);
 
+  // Web Speech API for user transcription fallback (Native Audio models don't return inputAudioTranscription)
+  const recognitionRef = useRef<any>(null);
+  
   // Smart status detection based on AI text content
   const detectSmartStatus = useCallback((text: string): VoiceStatus => {
     const lowerText = text.toLowerCase();
@@ -264,6 +267,16 @@ export function useGeminiLive(
       mediaStreamRef.current = null;
     }
 
+    // Stop Native Speech Recognition if active
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // Ignore
+      }
+      recognitionRef.current = null;
+    }
+
     setIsConnected(false);
     setIsConnecting(false);
     isConnectingRef.current = false;
@@ -369,6 +382,63 @@ export function useGeminiLive(
         }
         return import.meta.env.VITE_GEMINI_API_KEY;
       };
+
+      // Set up Native Web Speech API fallback for user transcriptions
+      try {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true; // Keep listening
+          recognition.interimResults = false; // Only final results
+          recognition.lang = 'en-US'; // Default to English, can be dynamic
+          
+          recognition.onresult = (event: any) => {
+            if (isMutedRef.current) return; // Don't transcribe if explicitly muted
+            
+            // Get the latest result
+            const currentResult = event.results[event.results.length - 1];
+            if (currentResult.isFinal) {
+              const transcript = currentResult[0].transcript.trim();
+              if (transcript) {
+                console.log("[GeminiLive] Native Speech Recognition:", transcript);
+                
+                // Track last transcript to prevent duplicates (in case Gemini ever fixes inputAudioTranscription)
+                const now = Date.now();
+                const isDuplicate = lastAiMessageRef.current?.text === transcript && 
+                                   (now - (lastAiMessageRef.current?.timestamp || 0)) < 2000;
+                
+                if (!isDuplicate) {
+                  updateMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    // Append if very recent, otherwise new message
+                    if (last && last.role === 'user' && (now - (last.timestamp || 0)) < 3000) {
+                      return [...prev.slice(0, -1), { ...last, text: last.text + ' ' + transcript, timestamp: now }];
+                    }
+                    return [...prev, { role: 'user', text: transcript, timestamp: now }];
+                  });
+                }
+              }
+            }
+          };
+
+          // Auto-restart if it stops unexpectedly while we're still connected
+          recognition.onend = () => {
+            if (sessionRef.current && !isCleaningUpRef.current) {
+              try {
+                recognition.start();
+              } catch (e) {
+                console.warn("[GeminiLive] Failed to restart SpeechRecognition");
+              }
+            }
+          };
+          
+          recognitionRef.current = recognition;
+          recognition.start();
+          console.log("[GeminiLive] Native Speech Recognition started.");
+        }
+      } catch (err) {
+        console.warn("[GeminiLive] SpeechRecognition not supported or failed to start:", err);
+      }
 
       const apiKey = getApiKey();
       if (!apiKey) throw new Error("API Key is missing.");

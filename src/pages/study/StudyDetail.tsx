@@ -17,6 +17,68 @@ const SUBJECT_CONFIG: Record<string, { icon: any; label: string; color: string }
     'default': { icon: BookOpen, label: 'Chapter', color: 'text-zinc-600 bg-zinc-50 border-zinc-200' },
 };
 
+// Subject accent colors for borders and bubbles (matching StudyLibrary)
+const getSubjectAccent = (subject: string) => {
+    switch (subject.toLowerCase()) {
+        case 'physics': return { 
+            bubble: 'bg-blue-500/5 group-hover:bg-blue-500/10', 
+            border: 'border-blue-200', 
+            hoverBorder: 'group-hover:border-blue-300',
+            badge: 'text-blue-600',
+            badgeBg: 'bg-blue-50 group-hover:bg-blue-100'
+        };
+        case 'chemistry': return { 
+            bubble: 'bg-emerald-500/5 group-hover:bg-emerald-500/10', 
+            border: 'border-emerald-200', 
+            hoverBorder: 'group-hover:border-emerald-300',
+            badge: 'text-emerald-600',
+            badgeBg: 'bg-emerald-50 group-hover:bg-emerald-100'
+        };
+        case 'biology': return { 
+            bubble: 'bg-rose-500/5 group-hover:bg-rose-500/10', 
+            border: 'border-rose-200', 
+            hoverBorder: 'group-hover:border-rose-300',
+            badge: 'text-rose-600',
+            badgeBg: 'bg-rose-50 group-hover:bg-rose-100'
+        };
+        case 'math': return { 
+            bubble: 'bg-indigo-500/5 group-hover:bg-indigo-500/10', 
+            border: 'border-indigo-200', 
+            hoverBorder: 'group-hover:border-indigo-300',
+            badge: 'text-indigo-600',
+            badgeBg: 'bg-indigo-50 group-hover:bg-indigo-100'
+        };
+        case 'accountancy': return { 
+            bubble: 'bg-amber-500/5 group-hover:bg-amber-500/10', 
+            border: 'border-amber-200', 
+            hoverBorder: 'group-hover:border-amber-300',
+            badge: 'text-amber-600',
+            badgeBg: 'bg-amber-50 group-hover:bg-amber-100'
+        };
+        case 'biotechnology': return { 
+            bubble: 'bg-teal-500/5 group-hover:bg-teal-500/10', 
+            border: 'border-teal-200', 
+            hoverBorder: 'group-hover:border-teal-300',
+            badge: 'text-teal-600',
+            badgeBg: 'bg-teal-50 group-hover:bg-teal-100'
+        };
+        case 'computer science': return { 
+            bubble: 'bg-purple-500/5 group-hover:bg-purple-500/10', 
+            border: 'border-purple-200', 
+            hoverBorder: 'group-hover:border-purple-300',
+            badge: 'text-purple-600',
+            badgeBg: 'bg-purple-50 group-hover:bg-purple-100'
+        };
+        default: return { 
+            bubble: 'bg-zinc-400/5 group-hover:bg-zinc-400/10', 
+            border: 'border-zinc-200', 
+            hoverBorder: 'group-hover:border-zinc-300',
+            badge: 'text-zinc-600',
+            badgeBg: 'bg-zinc-50 group-hover:bg-zinc-100'
+        };
+    }
+};
+
 export default function StudyDetail() {
     const { bookId } = useParams<{ bookId: string }>();
     const navigate = useNavigate();
@@ -70,7 +132,11 @@ export default function StudyDetail() {
                         <div className="flex items-center gap-2 mt-2 flex-wrap">
                             {/* Part pill if present */}
                             {(() => {
-                                const part = book.title.replace(book.subject, '').trim();
+                                const partMatch = book.title.match(/(Part\s*[A-Za-z]+|\b[A-Za-z]*\s*Part\s*[A-Za-z0-9]+)/i);
+                                let part = partMatch ? partMatch[0].trim() : '';
+                                if (!part) {
+                                    part = book.title.length > book.subject.length ? book.title : '';
+                                }
                                 return part ? (
                                     <span className="bg-amber-500 text-white text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full">
                                         {part}
@@ -93,42 +159,48 @@ export default function StudyDetail() {
                 <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-400 mb-4 ml-2">{sectionLabel}s</h2>
 
                 <div className="flex flex-col gap-3">
-                    {book?.chapters.map((chapter) => (
-                        <button
-                            key={chapter.index}
-                            onClick={() => {
-                                navigate(`/study/${book.id}/${chapter.index}`);
-                            }}
-                            className="bg-white rounded-3xl p-5 border border-zinc-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-all text-left flex gap-4 items-center group"
-                        >
-                            {/* Chapter number bubble */}
-                            <div className="w-12 h-12 bg-zinc-50 rounded-2xl border border-zinc-100 flex items-center justify-center shrink-0 group-hover:bg-amber-50 transition-colors">
-                                <div className="flex items-center text-zinc-400 font-bold text-xl">
-                                    <Hash size={16} strokeWidth={3} className="mr-0.5 opacity-50" />
-                                    <span className="group-hover:text-amber-600">{chapter.realChapterNum || chapter.index}</span>
+                    {book?.chapters.map((chapter) => {
+                        const accent = getSubjectAccent(book.subject);
+                        return (
+                            <button
+                                key={chapter.index}
+                                onClick={() => {
+                                    navigate(`/study/${book.id}/${chapter.index}`);
+                                }}
+                                className={`bg-white rounded-3xl p-5 border ${accent.border} shadow-sm hover:shadow-md ${accent.hoverBorder} transition-all text-left flex gap-4 items-center group relative overflow-hidden`}
+                            >
+                                {/* Soft corner glow bubble - matching subject color */}
+                                <div className={`pointer-events-none absolute -top-8 -right-8 w-28 h-28 rounded-full ${accent.bubble} transition-transform`} />
+
+                                {/* Chapter number bubble with subject color */}
+                                <div className={`w-12 h-12 ${accent.badgeBg} rounded-2xl border ${accent.border} flex items-center justify-center shrink-0 transition-colors`}>
+                                    <div className={`flex items-center font-bold text-xl ${accent.badge}`}>
+                                        <Hash size={16} strokeWidth={3} className="mr-0.5 opacity-50" />
+                                        <span>{chapter.realChapterNum || chapter.index}</span>
+                                    </div>
                                 </div>
-                            </div>
 
-                            <div className="flex-1 min-w-0 pr-4">
-                                {/* Bold section label heading */}
-                                <p className="text-[11px] font-bold uppercase tracking-widest text-amber-600 mb-0.5">
-                                    {sectionLabel} {chapter.realChapterNum || chapter.index}
-                                </p>
-                                {/* Section name — strip 'Chapter N:' or 'Unit N:' prefix if present */}
-                                <h3 className="font-bold text-zinc-900 group-hover:text-amber-800 transition-colors line-clamp-2 leading-snug text-sm">
-                                    {chapter.title.replace(/^(Chapter|Unit)\s+\d+[:\-]?\s*/i, '')}
-                                </h3>
-                                {/* Subsection range */}
-                                {chapter.subsectionRange && (
-                                    <p className="text-xs font-medium text-zinc-400 mt-1">
-                                        Subsections {chapter.subsectionRange}
+                                <div className="flex-1 min-w-0 pr-4 relative z-10">
+                                    {/* Bold section label heading with subject color */}
+                                    <p className={`text-[11px] font-bold uppercase tracking-widest mb-0.5 ${accent.badge}`}>
+                                        {sectionLabel} {chapter.realChapterNum || chapter.index}
                                     </p>
-                                )}
-                            </div>
+                                    {/* Section name — strip 'Chapter N:' or 'Unit N:' prefix if present */}
+                                    <h3 className="font-bold text-zinc-900 group-hover:text-zinc-700 transition-colors line-clamp-2 leading-snug text-sm">
+                                        {chapter.title.replace(/^(Chapter|Unit)\s+\d+[:\-]?\s*/i, '')}
+                                    </h3>
+                                    {/* Subsection range */}
+                                    {chapter.subsectionRange && (
+                                        <p className="text-xs font-medium text-zinc-400 mt-1">
+                                            Subsections {chapter.subsectionRange}
+                                        </p>
+                                    )}
+                                </div>
 
-                            <ChevronRight className="text-zinc-300 group-hover:text-amber-500 shrink-0" size={20} />
-                        </button>
-                    ))}
+                                <ChevronRight className="text-zinc-300 group-hover:text-zinc-400 shrink-0 relative z-10" size={20} />
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
         </div>

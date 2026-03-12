@@ -203,47 +203,59 @@ function extractTocChapters(rawText: string): Array<{ num: number; title: string
         chapters.push({ num, title: finalTitle });
     }
 
-    // If no chapters found with CHAPTER/UNIT pattern, try math book format:
-    // "1. Relations and Functions" or "1 Relations and Functions"
-    // This handles math textbooks where chapters are just numbered without "Chapter" prefix
-    if (chapters.length === 0) {
-        // Match lines like "1. Relations and Functions" or "1 Relations and Functions"
-        // The title should be Title Case (not ALL CAPS like physics chapter titles)
-        // and should NOT look like subsections (e.g., not "1.1 Introduction")
-        const mathChapterRegex = /^(\d{1,2})[.\s]\s*([A-Z][a-zA-Z\s\-&,():;'/.]+?)(?=\s+\d{1,3}\s*$|$)/gm;
-        
-        while ((match = mathChapterRegex.exec(text)) !== null) {
-            const num = parseInt(match[1], 10);
-            const titleRaw = match[2].trim();
-            
-            // Skip if this looks like a subsection (contains pattern like "1.1", "2.3" etc.)
-            if (/^\d+\.\d+/.test(titleRaw)) continue;
-            
-            // Skip if title is too short or too long
-            if (titleRaw.length < 3 || titleRaw.length > 100) continue;
-            
-            // Skip common non-chapter entries
-            const lowerTitle = titleRaw.toLowerCase();
-            if (JUNK_KEYWORDS.some(kw => lowerTitle.includes(kw))) continue;
-            
-            // Clean title: Title Case, collapse extra spaces
-            const title = titleRaw
-                .replace(/\s+/g, ' ')
-                .split(' ')
-                .map(w => {
-                    const lower = w.toLowerCase();
-                    // Keep short conjunctions lowercase unless first word
-                    if (['and', 'of', 'the', 'in', 'for', 'a', 'an', 'by', 'to'].includes(lower)) return lower;
-                    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
-                })
-                .join(' ');
+    // Math books like Part II often have cross-references to Part I in the prelims
+    // (e.g. "Chapter 1 Relations and Functions") that match the first regex, but their actual
+    // chapters are formatted simply as "7. Integrals". We run BOTH regexes sequentially
+    // to ensure we capture all chapters across both formats.
 
-            // Capitalise first letter regardless
-            const finalTitle = title.charAt(0).toUpperCase() + title.slice(1);
-            
-            chapters.push({ num, title: finalTitle });
-        }
+    // Match text like "1. Relations and Functions 15" or " 1 Relations and Functions 15"
+    // Since PDF extraction flattens text into a single line separated by spaces,
+    // we cannot rely on the ^ (start of line) anchor.
+    // We look for a space boundary, chapter number, optional dot, title case string, and a page number lookahead.
+    const mathChapterRegex = /(?:\s|^)(\d{1,2})\.?\s*([A-Z][a-zA-Z0-9\s\-&,():;'/.]+?)\s+(?=\d{1,3}(?:\s|$))/g;
+    
+    while ((match = mathChapterRegex.exec(text)) !== null) {
+        const num = parseInt(match[1], 10);
+        const titleRaw = match[2].trim();
+        
+        // Skip if this looks like a subsection (contains pattern like "1.1", "2.3" etc.)
+        if (/^\d+\.\d+/.test(titleRaw)) continue;
+        
+        // Skip if title is too short or too long
+        if (titleRaw.length < 3 || titleRaw.length > 100) continue;
+        
+        // Skip if title is literally just the word "Chapter" or "Unit", which happens when
+        // the regex accidentally matches a page number (e.g. "17 Chapter 2").
+        if (/^(?:chapter|unit)$/i.test(titleRaw)) continue;
+        
+        // Skip common non-chapter entries
+        const lowerTitle = titleRaw.toLowerCase();
+        if (JUNK_KEYWORDS.some(kw => lowerTitle.includes(kw))) continue;
+        
+        // Check if we already found this chapter from the first regex to avoid duplicates
+        if (chapters.some(c => c.num === num)) continue;
+
+        // Clean title: Title Case, collapse extra spaces
+        const title = titleRaw
+            .replace(/\s+/g, ' ')
+            .split(' ')
+            .map(w => {
+                const lower = w.toLowerCase();
+                // Keep short conjunctions lowercase unless first word
+                if (['and', 'of', 'the', 'in', 'for', 'a', 'an', 'by', 'to'].includes(lower)) return lower;
+                return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+            })
+            .join(' ');
+
+        // Capitalise first letter regardless
+        const finalTitle = title.charAt(0).toUpperCase() + title.slice(1);
+        
+        chapters.push({ num, title: finalTitle });
     }
+
+    // Sort numerically to ensure cross-references (Part I) and actual chapters (Part II)
+    // are arranged sequentially 1..N. The slice() logic later will grab the trailing ones for Part II.
+    chapters.sort((a, b) => a.num - b.num);
 
     return chapters;
 }
@@ -417,6 +429,21 @@ export async function extractChaptersFromZip(
     const relevantTocChapters = tocChapters.slice(-chapterFiles.length);
     console.log(`[ZipExtractor] Using ${relevantTocChapters.length} relevant TOC chapters:`,
         relevantTocChapters.map(c => `Ch${c.num}: ${c.title}`));
+
+    // Heuristic: If the first relevant chapter is 6 or higher, it is overwhelmingly likely to be Part II.
+    // This fixes cases where extractBookInfo() matched "Part I" from the cross-reference TOC.
+    if (relevantTocChapters.length > 0) {
+        const firstNum = relevantTocChapters[0].num;
+        if (firstNum >= 6 && !/Part II/i.test(bookTitleHint)) {
+            if (/Part I\b/i.test(bookTitleHint)) {
+                bookTitleHint = bookTitleHint.replace(/Part I\b/i, 'Part II');
+            } else {
+                bookTitleHint += ' Part II';
+            }
+        } else if (firstNum === 1 && /Part II/i.test(bookTitleHint)) {
+            bookTitleHint = bookTitleHint.replace(/Part II/i, 'Part I');
+        }
+    }
 
     let totalDiagramsExtracted = 0;
 

@@ -26,26 +26,26 @@ The application is built on a responsive, mobile-first React architecture, makin
 ```mermaid
 flowchart TB
   User((Student))
-  MobileUI[MobileFirst_UI_React_Vite]
+  MobileUI["MobileFirst UI (React+Vite)"]
   User --> MobileUI
 
-  subgraph Modes[Learning_Modes]
-    LabMode[Lab_Mode]
-    ExamMode[Exam_Mode]
-    TutorMode[Tutor_Mode]
+  subgraph Modes["Learning Modes"]
+    LabMode["Lab Mode"]
+    ExamMode["Exam Mode"]
+    TutorMode["Tutor Mode"]
   end
 
   MobileUI --> LabMode
   MobileUI --> ExamMode
   MobileUI --> TutorMode
 
-  subgraph Live[Realtime_Audio_%26_Vision_(Gemini_Live_API)]
-    useGeminiLive[useGeminiLive]
+  subgraph Live["Realtime Audio & Vision (Gemini Live API)"]
+    useGeminiLive["useGeminiLive"]
     LiveModelLabExam["gemini-2.5-flash-native-audio-latest\n(Lab/Exam)"]
     LiveModelTutor["gemini-2.5-flash-native-audio-preview-12-2025\n(Tutor)"]
-    Mic[Mic_Audio_PCM16_16kHz]
-    Cam[Camera_Frames_JPEG_1fps]
-    LiveOut[Audio_Out_PCM_24kHz\n+_Transcripts]
+    Mic["Mic Audio (PCM16 16kHz)"]
+    Cam["Camera Frames (JPEG 1fps)"]
+    LiveOut["Audio Out (PCM 24kHz)\n+ Transcripts"]
   end
 
   LabMode --> useGeminiLive
@@ -58,12 +58,12 @@ flowchart TB
   Cam --> useGeminiLive
   useGeminiLive --> LiveOut
 
-  subgraph Tools[Live_Tools_%26_Media]
-    Whiteboard[Whiteboard_Tool_Calls\n(add_step/highlight/clear)]
-    ImgTool[generate_image]
-    VidTool[generate_video]
-    ImgGen["Image_Generation\n(gemini-3.1-flash-image-preview)"]
-    VidGen["Video_Generation\n(veo-3.0-generate-001,\n generateAudio=false,\n aspectRatio=9:16)"]
+  subgraph Tools["Live Tools & Media"]
+    Whiteboard["Whiteboard Tool Calls\n(add_step/highlight/clear)"]
+    ImgTool["generate_image"]
+    VidTool["generate_video"]
+    ImgGen["Image Generation\n(gemini-3.1-flash-image-preview)"]
+    VidGen["Video Generation\n(veo-3.0-generate-001,\ngenerateAudio=false,\naspectRatio=9:16)"]
   end
 
   useGeminiLive --> Whiteboard
@@ -72,10 +72,10 @@ flowchart TB
   ImgTool --> ImgGen
   VidTool --> VidGen
 
-  subgraph Firebase[Firebase]
-    Auth[Auth]
-    Firestore[Firestore\nsessions/videoJobs/mediaCache]
-    Storage[Storage\ntextbooks/images/videos]
+  subgraph Firebase["Firebase"]
+    Auth["Auth"]
+    Firestore["Firestore\nsessions/videoJobs/mediaCache"]
+    Storage["Storage\ntextbooks/images/videos"]
   end
 
   useGeminiLive --> Auth
@@ -84,8 +84,8 @@ flowchart TB
   VidGen --> Storage
   VidGen --> Firestore
 
-  subgraph Reasoning[Reasoning_%26_Text]
-    TutorText["TutorChat_Text\n(gemini-3.1-pro-preview)"]
+  subgraph Reasoning["Reasoning & Text"]
+    TutorText["TutorChat Text\n(gemini-3.1-pro-preview)"]
     Eval["useGeminiReasoning\n(gemini-3.1-pro-preview\nfallback gemini-3-pro-preview)"]
     Cleanup["useSessions_cleanup\n(gemini-3.1-pro-preview)"]
     TextbookParse["useTextbookParser\n(gemini-3.1-flash-lite-preview)"]

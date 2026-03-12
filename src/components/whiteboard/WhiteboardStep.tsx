@@ -134,7 +134,7 @@ export default function WhiteboardStep({
       <div className="space-y-2">
         {/* Math formula - shown only when complete to avoid partial KaTeX render errors */}
         {status === 'complete' && math && (
-          <div className="text-zinc-800 text-lg overflow-x-auto transition-opacity duration-300 opacity-100">
+          <div className="text-zinc-800 text-base overflow-x-auto transition-opacity duration-300 opacity-100 pb-1">
             <BlockMath math={math} />
           </div>
         )}

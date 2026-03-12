@@ -230,9 +230,17 @@ export function hasUserCommunication(messages: SessionMessage[]): boolean {
   // Primary: has user speech (transcription arrived)
   if (userMessages.some(m => m.text.trim().length > 0)) return true;
 
-  // Fallback: AI spoke 4+ times = real session definitely happened
+  // Fallback 1: AI spoke 4+ times = real session definitely happened
   // (Gemini inputAudioTranscription may have failed but conversation was real)
-  return aiMessages.length >= 4;
+  if (aiMessages.length >= 4) return true;
+  
+  // Fallback 2: AI sent a massive block of text (often happens when AI transcriptions get merged)
+  if (aiMessages.some(m => m.text.length > 200)) return true;
+  
+  // Fallback 3: Media or whiteboard was generated/used (indicates real interaction)
+  if (countMedia(messages) > 0 || hasWhiteboardUsage(messages)) return true;
+
+  return false;
 }
 
 /**

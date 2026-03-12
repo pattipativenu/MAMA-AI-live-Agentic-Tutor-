@@ -162,6 +162,12 @@ You have 3 whiteboard functions. Use them to write step-by-step on the student's
 3. clear_whiteboard()
    → Clears all steps. Use when starting a completely new problem.
 
+═══ FORMATTING RULES ═══
+1. When writing a question on the board, start the explanation text with "QUESTION: ".
+2. When answering or solving it, start the explanation text with "ANSWER: " or "SOLUTION: ".
+3. KEEP MATH SHORT. The student is on a mobile phone screen. Use LaTeX \\\\ to break long equations into multiple logical lines so it does not overflow horizontally.
+4. Do NOT leave dangling brackets \`)\]}\` on new lines by themselves.
+
 ═══ INTERACTIVE TEACHING FLOW ═══
 
 Step 1: Write the problem with add_whiteboard_step
@@ -229,7 +235,7 @@ function buildInteractivePauseInstructions(): string {
         1. Say: "If you look at page [PAGE_NUMBER] in your textbook..."
         2. Describe what they'll see: "You'll see Figure [X.X] which shows..."
         3. PAUSE and ask: "Are you on that page now? Can you see the figure?"
-        4. WAIT for user confirmation (they'll say "yes" or "I'm there")
+        4. STOP GENERATING AUDIO AND TEXT. WAIT for user confirmation (they'll say "yes" or "I'm there")
         5. Only continue after they confirm: "Great! Now notice how..."
       </steps>
       <example>
@@ -239,7 +245,12 @@ function buildInteractivePauseInstructions(): string {
         "Great! Now notice how the field lines curve around the charges..."
       </example>
       <voice_tone>Use a patient, encouraging tone. Give them time to find the page.</voice_tone>
-    </interactive_references>`;
+    </interactive_references>
+    <interactive_pauses>
+      <rule>CRITICAL: Whenever you ask the user ANY question, you MUST STOP GENERATING IMMEDIATELY.</rule>
+      <rule>NEVER answer your own question. NEVER say 'That's right!' or 'Exactly!' until the user has ACTUALLY spoken.</rule>
+      <rule>Give the student time to think and speak. Do not rush them.</rule>
+    </interactive_pauses>`;
 }
 
 /** Build page number extraction instructions */
@@ -250,10 +261,12 @@ function buildPageNumberInstructions(chapterText: string): string {
     
     return `
     <page_number_rules>
-      <rule>ALWAYS use the ACTUAL page numbers from the textbook, not relative page numbers.</rule>
-      <rule>When the chapter text mentions a figure or diagram, note the page number where it appears.</rule>
+      <rule>ALWAYS use the ACTUAL PRINTED PAGE NUMBERS found physically written in the textbook content.</rule>
+      <rule>WARNING: The text contains markers like "--- PAGE 9 ---". These are just absolute PDF file indices, NOT the printed page numbers! IGNORE the PDF markers.</rule>
+      <rule>Look at the actual text surrounding the content to find the real printed page number (e.g., if you see the number "26" at the top or bottom of the text on that page, that is the real page number!).</rule>
+      <rule>When the chapter text mentions a figure or diagram, note the printed page number where it appears.</rule>
       ${pages.length > 0 ? `<example_pages>Pages mentioned in this chapter: ${pages.join(', ')}</example_pages>` : ''}
-      <instruction>Look for patterns like "Page 257", "on page 258", etc. in the source text and use those exact numbers when referring students to the textbook.</instruction>
+      <instruction>Look for patterns like "Page 257", "on page 258", or floating numbers at the page boundaries in the source text and use those exact printed numbers when referring students to the textbook.</instruction>
     </page_number_rules>`;
 }
 
@@ -280,42 +293,8 @@ export default function TutorChat() {
 
     // Chat state
     const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [inputStr, setInputStr] = useState('');
-    const [isTyping, setIsTyping] = useState(false);
-    const bottomRef = useRef<HTMLDivElement>(null);
 
-    // Session ID for text chat mode
-    const textChatSessionIdRef = useRef<string>(Date.now().toString());
-    
-    // Auto-save text chat sessions when leaving
-    // Use a ref to track latest messages so cleanup always has current data
-    const messagesForSaveRef = useRef(messages);
-    messagesForSaveRef.current = messages;
 
-    useEffect(() => {
-        const saveTextChatSession = () => {
-            const msgs = messagesForSaveRef.current;
-            if (msgs.length > 1) { // > 1 because first message is the greeting
-                const sessionMessages: SessionMessage[] = msgs.map(m => ({
-                    role: m.role === 'model' ? 'ai' : 'user',
-                    text: m.text,
-                    image: m.imageUrl
-                }));
-                saveSession('tutor', sessionMessages, textChatSessionIdRef.current);
-            }
-        };
-
-        // Also save on page unload (covers browser close/refresh)
-        const handleBeforeUnload = () => saveTextChatSession();
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            // Save on component unmount (navigation within app)
-            saveTextChatSession();
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
 
     // Voice mode with selected voice from profile
     const {
@@ -342,6 +321,7 @@ export default function TutorChat() {
         (msgs, media) => {
             // Save to Firestore as tutor mode (now includes generated media)
             saveSession('tutor', msgs, undefined, undefined, media);
+            
             // Also sync to chat messages so user sees conversation when returning to chat
             if (msgs.length > 0) {
                 const chatMsgs: ChatMessage[] = msgs.map(m => ({
@@ -386,9 +366,7 @@ export default function TutorChat() {
         prevMediaLengthRef.current = generatedMedia.length;
     }, [generatedMedia, profile?.autoAdvanceCarousel, voiceMode]);
     
-    // Camera state
-    const [cameraImage, setCameraImage] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+
 
     // Book data
     useEffect(() => {
@@ -443,10 +421,6 @@ export default function TutorChat() {
         };
     }, []);
 
-    // Scroll to bottom in chat mode
-    useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isTyping]);
 
     // Auto-exit voice mode if connection drops unexpectedly mid-session
     useEffect(() => {
@@ -490,11 +464,11 @@ export default function TutorChat() {
 
   <source_material>
     <chapter_text>
-${chapterContent}
+${chapterContent ? chapterContent.substring(0, 15000) : ''}
     </chapter_text>
 ${answersContent ? `    <answers_reference>
       <!-- PRIVATE: Official answers. Use to verify, guide, NEVER reveal directly. -->
-${answersContent}
+${answersContent.substring(0, 5000)}
     </answers_reference>` : ''}
   </source_material>
 
@@ -543,66 +517,6 @@ ${answersContent}
         setMessages([{ role: 'model', text: greeting }]);
     }, [chapterContent, chapterMetadata, profile]);
 
-    // Send chat message (with optional image)
-    const handleSend = async () => {
-        const hasText = inputStr.trim();
-        const hasImage = !!cameraImage;
-        if ((!hasText && !hasImage) || !chapterContent || isTyping) return;
-        
-        const userMsg = hasText ? inputStr.trim() : "Please review this image and help me understand it.";
-        setInputStr('');
-        
-        // Show message with image in UI
-        const displayText = hasImage 
-            ? `${userMsg} ${hasText ? '' : ''}`
-            : userMsg;
-        const imageToSend = cameraImage;
-        setMessages(prev => [...prev, { role: 'user', text: displayText, imageUrl: imageToSend || undefined }]);
-        setIsTyping(true);
-
-        try {
-            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-            
-            // Build message parts
-            const parts: any[] = [{ text: userMsg }];
-            
-            // Add image if captured
-            if (cameraImage) {
-                const match = cameraImage.match(/^data:([^;]+);base64,(.+)$/);
-                if (match) {
-                    const [, mimeType, base64Data] = match;
-                    parts.push({
-                        inlineData: {
-                            mimeType,
-                            data: base64Data
-                        }
-                    });
-                }
-                clearCameraImage();
-            }
-
-            const chatSession = ai.chats.create({
-                model: 'gemini-3.1-pro-preview',
-                config: {
-                    systemInstruction: buildSystemInstruction(focusTopic),
-                    temperature: 0.3,
-                }
-            });
-
-            const history = messages.slice(1);
-            for (const m of history) {
-                await chatSession.sendMessage({ message: m.text });
-            }
-
-            const result = await chatSession.sendMessage({ message: parts });
-            setMessages(prev => [...prev, { role: 'model', text: result.text || '' }]);
-        } catch (err) {
-            console.error(err);
-            setMessages(prev => [...prev, { role: 'model', text: 'Sorry, I ran into an error. Please try again!' }]);
-        } finally {
-            setIsTyping(false);
-        }
-    };
 
     // Toggle voice mode
     const handleVoiceToggle = async () => {
@@ -684,8 +598,6 @@ ${answersContent}
 
             streamRef.current = stream;
             setIsVideoActive(true);
-            // Clear any captured image when starting live video
-            setCameraImage(null);
         } catch (err: any) {
             console.error("Failed to start camera:", err);
 
@@ -710,7 +622,6 @@ ${answersContent}
                     }
                     streamRef.current = fallbackStream;
                     setIsVideoActive(true);
-                    setCameraImage(null);
                     setCameraError(null);
                     return;
                 } catch (fallbackErr) {
@@ -737,34 +648,7 @@ ${answersContent}
         }
     };
 
-    // Camera photo capture handlers
-    const handleCameraClick = () => {
-        fileInputRef.current?.click();
-    };
 
-    const handleCameraCapture = (e: ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const base64 = reader.result as string;
-            setCameraImage(base64);
-            
-            // If in voice mode and connected, send image to Gemini
-            if (isConnected && voiceMode) {
-                sendClientMessage("I'm sharing a photo of my work. Please review it and help me understand any mistakes or areas for improvement.", base64);
-            }
-        };
-        reader.readAsDataURL(file);
-        
-        // Reset input so same file can be selected again
-        e.target.value = '';
-    };
-
-    const clearCameraImage = () => {
-        setCameraImage(null);
-    };
 
     // Strip "Chapter N:" prefix helper
     const chapterDisplayName = chapterMetadata?.title.replace(/^Chapter\s+\d+[:\-]?\s*/i, '') || '';
@@ -1091,45 +975,9 @@ ${answersContent}
                     </div>
                 )}
 
-                {/* Camera Preview */}
-                {cameraImage && (
-                    <div className="bg-white border-t border-zinc-200 px-4 py-3 z-20">
-                        <div className="flex items-center gap-3">
-                            <div className="relative shrink-0">
-                                <img 
-                                    src={cameraImage} 
-                                    alt="Captured" 
-                                    className="w-16 h-16 rounded-xl object-cover border-2 border-amber-200"
-                                />
-                                <button
-                                    onClick={clearCameraImage}
-                                    className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white shadow-md"
-                                >
-                                    <X size={14} />
-                                </button>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-zinc-700">Photo captured</p>
-                                <p className="text-xs text-zinc-500">
-                                    {isConnected ? 'Sent to Mama AI' : 'Will be sent when connected'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {/* Bottom Control Bar */}
                 <div className="bg-white border-t border-zinc-200 p-6 pb-8 z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
-                    {/* Hidden file input for camera */}
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleCameraCapture}
-                        className="hidden"
-                    />
-                    
                     <div className="flex items-center justify-between max-w-sm mx-auto">
                         {/* Live Camera Toggle */}
                         <button 
@@ -1145,23 +993,6 @@ ${answersContent}
                             </div>
                             <span className={`text-xs font-medium ${isVideoActive ? 'text-red-600' : 'text-zinc-500'}`}>
                                 {isVideoActive ? 'Live' : 'Camera'}
-                            </span>
-                        </button>
-
-                        {/* Photo Button */}
-                        <button 
-                            onClick={handleCameraClick}
-                            className="flex flex-col items-center gap-2 group"
-                        >
-                            <div className={`w-14 h-14 rounded-full flex items-center justify-center border transition-colors ${
-                                cameraImage 
-                                    ? 'bg-amber-100 border-amber-300' 
-                                    : 'bg-zinc-50 border-zinc-200 group-hover:bg-zinc-100'
-                            }`}>
-                                <Camera size={24} className={cameraImage ? 'text-amber-600' : 'text-zinc-600'} />
-                            </div>
-                            <span className={`text-xs font-medium ${cameraImage ? 'text-amber-600' : 'text-zinc-500'}`}>
-                                {cameraImage ? 'Photo' : 'Photo'}
                             </span>
                         </button>
 
@@ -1419,104 +1250,20 @@ ${answersContent}
                         </div>
                     </div>
                 ))}
-
-                {isTyping && (
-                    <div className="flex justify-start">
-                        <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center shrink-0 mr-2">
-                            <Sparkles size={14} className="text-amber-600" />
-                        </div>
-                        <div className="bg-white border border-zinc-200 rounded-3xl rounded-tl-sm px-5 py-4 shadow-sm flex gap-1.5 items-center">
-                            <div className="w-2 h-2 rounded-full bg-amber-300 animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <div className="w-2 h-2 rounded-full bg-amber-300 animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <div className="w-2 h-2 rounded-full bg-amber-300 animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                    </div>
-                )}
-                <div ref={bottomRef} className="h-2 shrink-0" />
             </div>
 
-            {/* Input bar */}
+            {/* Input bar - Voice Session Re-entry Only */}
             <div className="bg-white border-t border-zinc-200 p-3 sm:p-4 safe-area-pb">
-                {/* Resume Voice Session Button */}
                 <button
                     onClick={() => {
                         playModeEntrySound();
                         handleVoiceToggle();
                     }}
-                    className="w-full mb-3 bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
+                    className="w-full bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-bold py-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all"
                 >
                     <Mic size={20} />
                     Resume Voice Session
                 </button>
-
-                {/* Camera preview in text mode */}
-                {cameraImage && (
-                    <div className="flex items-center gap-2 mb-3 px-1">
-                        <div className="relative">
-                            <img 
-                                src={cameraImage} 
-                                alt="Captured" 
-                                className="w-12 h-12 rounded-lg object-cover border border-amber-200"
-                            />
-                            <button
-                                onClick={clearCameraImage}
-                                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white"
-                            >
-                                <X size={12} />
-                            </button>
-                        </div>
-                        <span className="text-xs text-zinc-500">Photo ready to send</span>
-                    </div>
-                )}
-                
-                <form
-                    onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-                    className="flex items-end gap-2 max-w-3xl mx-auto"
-                >
-                    {/* Camera button */}
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleCameraCapture}
-                        className="hidden"
-                    />
-                    <button
-                        type="button"
-                        onClick={handleCameraClick}
-                        className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                            cameraImage 
-                                ? 'bg-amber-100 text-amber-600' 
-                                : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
-                        }`}
-                    >
-                        <Camera size={20} />
-                    </button>
-                    
-                    <div className="flex-1 bg-zinc-100 border border-zinc-200 rounded-3xl overflow-hidden focus-within:border-amber-400 focus-within:ring-2 focus-within:ring-amber-400/20 transition-all flex items-center">
-                        <textarea
-                            value={inputStr}
-                            onChange={(e) => setInputStr(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSend();
-                                }
-                            }}
-                            placeholder="Ask anything about this chapter…"
-                            className="flex-1 max-h-28 min-h-[48px] bg-transparent border-none focus:outline-none focus:ring-0 px-4 py-3.5 resize-none text-sm font-medium"
-                            rows={1}
-                        />
-                        <button
-                            type="submit"
-                            disabled={(!inputStr.trim() && !cameraImage) || isTyping}
-                            className="mr-2 w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-50 disabled:bg-zinc-300 transition-colors"
-                        >
-                            <Send size={18} className="translate-x-px" />
-                        </button>
-                    </div>
-                </form>
             </div>
 
             {/* Media Fullscreen Modal */}

@@ -208,7 +208,11 @@ export default function StudyLibrary() {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 gap-4">
-                    {textbooks.map((book) => (
+                    {[...textbooks].sort((a, b) => {
+                        const subjectCompare = a.subject.localeCompare(b.subject);
+                        if (subjectCompare !== 0) return subjectCompare;
+                        return a.title.localeCompare(b.title);
+                    }).map((book) => (
                         <div
                             key={book.id}
                             onClick={() => navigate(`/study/${book.id}`)}
@@ -243,11 +247,14 @@ export default function StudyLibrary() {
                                 <h3 className="font-bold text-zinc-900 text-base truncate">
                                     {book.subject}
                                 </h3>
-                                {/* Part number (e.g. "Part I") — extracted from title by stripping subject name */}
+                                {/* Part number (e.g. "Part I") — extracted from title using RegEx */}
                                 {(() => {
-                                    const part = book.title
-                                        .replace(book.subject, '')
-                                        .trim();
+                                    const partMatch = book.title.match(/(Part\s*[A-Za-z]+|\b[A-Za-z]*\s*Part\s*[A-Za-z0-9]+)/i);
+                                    let part = partMatch ? partMatch[0].trim() : '';
+                                    if (!part) {
+                                        // Fallback if "Part" isn't explicitly there but book.title is longer
+                                        part = book.title.length > book.subject.length ? book.title : '';
+                                    }
                                     return part ? (
                                         <p className="text-sm font-semibold text-amber-600 mt-0.5">{part}</p>
                                     ) : null;
