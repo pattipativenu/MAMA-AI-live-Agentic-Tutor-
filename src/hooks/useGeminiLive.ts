@@ -415,10 +415,8 @@ export function useGeminiLive(
       }
 
       // 3. Connect to Gemini Live API with selected voice
-      // Lab/Exam: latest (better rate limits); Tutor: preview
-      const liveModel = mode === 'tutor'
-        ? 'gemini-2.5-flash-native-audio-preview-12-2025'
-        : 'gemini-2.5-flash-native-audio-latest';
+      // Using latest version across all modes for improved stability and latency
+      const liveModel = 'gemini-2.5-flash-native-audio-latest';
       const sessionPromise = ai.live.connect({
         model: liveModel,
         config: {
@@ -462,7 +460,11 @@ export function useGeminiLive(
 
             const source = audioContext.createMediaStreamSource(stream);
             const gainNode = audioContext.createGain();
-            gainNode.gain.value = 2.0;
+            // Reduced gain from 2.0 to 1.0 to prevent echo from interrupting the AI.
+            // Often, AI's own audio coming from the speakers can be picked up by the mic,
+            // and an overly amplified mic will trigger the server's Voice Activity Detection (VAD)
+            // and incorrectly interrupt the AI.
+            gainNode.gain.value = 1.0;
 
             const processor = audioContext.createScriptProcessor(4096, 1, 1);
             processorRef.current = processor;
