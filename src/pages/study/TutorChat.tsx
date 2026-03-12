@@ -380,6 +380,14 @@ export default function TutorChat() {
     const mediaGalleryRef = useRef<HTMLDivElement>(null);
     const prevMediaLengthRef = useRef(0);
 
+    // Debug: Log when generatedMedia changes
+    useEffect(() => {
+        console.log('[TutorChat] generatedMedia updated:', generatedMedia.length, 'items');
+        generatedMedia.forEach((m, i) => {
+            console.log(`  [${i}] ${m.type}: ${m.url.substring(0, 50)}...`);
+        });
+    }, [generatedMedia]);
+
     // Auto-scroll and auto-expand new images when autoAdvanceCarousel is enabled
     useEffect(() => {
         const autoAdvance = profile?.autoAdvanceCarousel ?? true;
@@ -387,6 +395,7 @@ export default function TutorChat() {
         // Check if new media was added
         if (generatedMedia.length > prevMediaLengthRef.current) {
             const newMedia = generatedMedia[generatedMedia.length - 1];
+            console.log('[TutorChat] New media added:', newMedia.type, newMedia.url.substring(0, 50));
             
             // Auto-scroll to media gallery
             if (mediaGalleryRef.current) {
