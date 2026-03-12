@@ -90,6 +90,9 @@ export function useGeminiLive(
   // Audio playback state
   const playbackContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
+  
+  // TTS audio analyser for visualization (GlobeVisualizer)
+  const ttsAnalyserRef = useRef<AnalyserNode | null>(null);
 
   // Guard to prevent double connection
   const isConnectingRef = useRef(false);
@@ -997,7 +1000,18 @@ export function useGeminiLive(
 
                     const source = playbackContextRef.current.createBufferSource();
                     source.buffer = audioBuffer;
-                    source.connect(playbackContextRef.current.destination);
+                    
+                    // Create/connect analyser for visualization if not exists
+                    if (!ttsAnalyserRef.current) {
+                      const analyser = playbackContextRef.current.createAnalyser();
+                      analyser.fftSize = 256;
+                      analyser.smoothingTimeConstant = 0.6;
+                      ttsAnalyserRef.current = analyser;
+                    }
+                    
+                    // Chain: source -> analyser -> destination
+                    source.connect(ttsAnalyserRef.current);
+                    ttsAnalyserRef.current.connect(playbackContextRef.current.destination);
 
                     const startTime = Math.max(playbackContextRef.current.currentTime, nextPlayTimeRef.current);
                     source.start(startTime);
@@ -1415,6 +1429,9 @@ export function useGeminiLive(
     generatedMedia,
     currentMediaIndex,
     whiteboardState,
+    // Audio visualization refs for GlobeVisualizer
+    audioStream: mediaStreamRef.current,
+    ttsAnalyser: ttsAnalyserRef.current,
     connect,
     disconnect,
     toggleMute,
