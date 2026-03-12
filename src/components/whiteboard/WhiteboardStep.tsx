@@ -49,7 +49,6 @@ export default function WhiteboardStep({
   // Typing animation — explanation only, math shown only on complete
   useEffect(() => {
     if (status !== 'typing') {
-      setDisplayedExplanation('');
       return;
     }
     setDisplayedExplanation('');
@@ -65,14 +64,6 @@ export default function WhiteboardStep({
     }, 22);
     return () => clearInterval(timer);
   }, [status, explanation]);
-
-  const renderMath = () => {
-    try {
-      return <BlockMath math={math} />;
-    } catch {
-      return <code className="text-xs text-zinc-300 break-all">{math}</code>;
-    }
-  };
 
   // Render explanation with orange highlighting for key terms
   const renderExplanation = (text: string) => {
@@ -144,13 +135,13 @@ export default function WhiteboardStep({
         {/* Math formula - shown only when complete to avoid partial KaTeX render errors */}
         {status === 'complete' && math && (
           <div className="text-zinc-800 text-lg overflow-x-auto transition-opacity duration-300 opacity-100">
-            {renderMath()}
+            <BlockMath math={math} />
           </div>
         )}
 
         {/* Explanation text - typewriter style with natural flow and orange highlighting */}
         {explanation && (
-          <p className="text-sm text-zinc-300 leading-relaxed">
+          <p className="text-sm text-zinc-600 leading-relaxed">
             {renderExplanation(status === 'typing' ? displayedExplanation : explanation)}
             {status === 'typing' && displayedExplanation.length < explanation.length && (
               <span className="inline-block w-0.5 h-4 bg-amber-500 ml-0.5 animate-pulse align-middle" />
