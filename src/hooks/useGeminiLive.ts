@@ -338,6 +338,12 @@ export function useGeminiLive(
       const playbackContext = new AudioContextClass({ sampleRate: 24000 });
       playbackContextRef.current = playbackContext;
       nextPlayTimeRef.current = playbackContext.currentTime;
+      
+      // Create TTS analyser for visualization (GlobeVisualizer)
+      const analyser = playbackContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.6;
+      ttsAnalyserRef.current = analyser;
 
       // 2. Get Microphone Access
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1001,17 +1007,13 @@ export function useGeminiLive(
                     const source = playbackContextRef.current.createBufferSource();
                     source.buffer = audioBuffer;
                     
-                    // Create/connect analyser for visualization if not exists
-                    if (!ttsAnalyserRef.current) {
-                      const analyser = playbackContextRef.current.createAnalyser();
-                      analyser.fftSize = 256;
-                      analyser.smoothingTimeConstant = 0.6;
-                      ttsAnalyserRef.current = analyser;
+                    // Chain: source -> analyser (for visualization) -> destination
+                    if (ttsAnalyserRef.current) {
+                      source.connect(ttsAnalyserRef.current);
+                      ttsAnalyserRef.current.connect(playbackContextRef.current.destination);
+                    } else {
+                      source.connect(playbackContextRef.current.destination);
                     }
-                    
-                    // Chain: source -> analyser -> destination
-                    source.connect(ttsAnalyserRef.current);
-                    ttsAnalyserRef.current.connect(playbackContextRef.current.destination);
 
                     const startTime = Math.max(playbackContextRef.current.currentTime, nextPlayTimeRef.current);
                     source.start(startTime);
