@@ -503,7 +503,10 @@ export function useGeminiLive(
       const sessionPromise = ai.live.connect({
         model: liveModel,
         config: {
-          tools: [{ functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration, showMediaDeclaration, hideMediaDeclaration] }],
+          tools: [
+  { functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration, showMediaDeclaration, hideMediaDeclaration] },
+  ...(mode === 'lab' ? [{ googleSearch: {} }] : []),
+],
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: {

@@ -180,7 +180,8 @@ export function useSessions() {
     rawMessages: SessionMessage[],
     sessionId?: string,
     evaluation?: SessionEvaluation,
-    generatedMedia?: GeneratedMedia[]
+    generatedMedia?: GeneratedMedia[],
+    force = false
   ): Promise<string | null> => {
     console.log('[useSessions] saveSession called with', rawMessages.length, 'messages, mode:', mode);
     
@@ -202,8 +203,8 @@ export function useSessions() {
       return null;
     }
     
-    // Check for duplicates
-    if (isDuplicateSession(mode, filteredMessages)) {
+    // Check for duplicates (skip if force=true, e.g. auto-save updating existing session)
+    if (!force && isDuplicateSession(mode, filteredMessages)) {
       console.log('[useSessions] Duplicate session detected, not saving');
       return null;
     }
@@ -212,33 +213,71 @@ export function useSessions() {
     
     // Count media
     const mediaCount = countMedia(filteredMessages);
-    
+
     // Check whiteboard usage
     const whiteboardUsed = hasWhiteboardUsage(filteredMessages);
-    
+
     // Generate initial placeholder summary
     const firstUserText = filteredMessages.find(m => m.role === 'user')?.text || '';
     let summary = firstUserText.slice(0, 60) + (firstUserText.length > 60 ? '...' : '');
-    
+
+    // CRITICAL: Strip base64 data URIs from messages to prevent exceeding
+    // Firestore's 1MB document size limit. Images should already be uploaded
+    // to Firebase Storage (returning a URL), but strip any remaining data URIs
+    // as a safety net.
+    const sanitizedMessages = filteredMessages.map(m => ({
+      ...m,
+      // Keep Storage URLs, strip data URIs
+      image: m.image?.startsWith('data:') ? undefined : m.image,
+    }));
+
+    // Also sanitize generatedMedia - strip data URIs from images
+    const sanitizedMedia = generatedMedia?.map(m => {
+      if (m.type === 'image' && m.url.startsWith('data:')) {
+        console.warn('[useSessions] Stripping data URI from generatedMedia (image not uploaded to Storage)');
+        return { ...m, url: '' }; // Empty URL signals upload failure
+      }
+      return m;
+    }).filter(m => m.url.length > 0); // Remove items with empty URLs
+
     // Create session object
     const session: SavedSession = {
       id,
       date: now,
       mode,
       summary,
-      messages: filteredMessages,
+      messages: sanitizedMessages,
       hasUserCommunication: true,
       whiteboardUsed,
       mediaCount,
       ...(evaluation ? { evaluation } : {}),
-      ...(generatedMedia && generatedMedia.length > 0 ? { generatedMedia } : {}),
+      ...(sanitizedMedia && sanitizedMedia.length > 0 ? { generatedMedia: sanitizedMedia } : {}),
     };
 
     // Save to Firestore
     if (currentUser) {
       console.log('[useSessions] Saving session:', id);
-      await saveSessionToDb(currentUser.uid, session);
-      
+      try {
+        await saveSessionToDb(currentUser.uid, session);
+      } catch (error: any) {
+        console.error('[useSessions] SAVE FAILED:', error);
+        // If document is still too large, retry without media
+        if (error.message?.includes('maximum allowed size') || error.code === 'resource-exhausted') {
+          console.warn('[useSessions] Retrying save without media...');
+          const liteSession: SavedSession = {
+            ...session,
+            messages: session.messages.map(m => ({ ...m, image: undefined, video: undefined })),
+            generatedMedia: undefined,
+          };
+          try {
+            await saveSessionToDb(currentUser.uid, liteSession);
+            console.log('[useSessions] Saved lite session (without media)');
+          } catch (retryErr) {
+            console.error('[useSessions] Lite save also failed:', retryErr);
+          }
+        }
+      }
+
       // Generate smart heading asynchronously (don't block)
       generateSmartHeading(currentUser.uid, session);
     } else {

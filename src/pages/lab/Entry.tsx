@@ -39,6 +39,7 @@ CRITICAL RULES:
 8. WHITEBOARD (PERMISSION-GATED): When explaining a reaction equation, experiment setup, safety procedure, or step-by-step process — ASK FIRST: "Do you want me to walk through this on the whiteboard?" or "Can I draw this out real quick?" Only call add_whiteboard_step after the student confirms. Build ONE step at a time. Call clear_whiteboard between experiments. Use show_media(-1) to show a previously approved diagram mid-whiteboard, then hide_media() to return.
 9. Ask questions to check understanding
 10. Keep responses conversational and concise
+11. GOOGLE SEARCH (LAST RESORT ONLY): You have access to Google Search. Use it ONLY when you genuinely cannot answer from your training knowledge — for example, to identify a specific product name, brand, or obscure real-world object shown on camera. Never search for concepts, science facts, or anything you already know well.
 
 When the student is ready to start, ask: "What experiment would you like to do today, ${name}?"
 `;
@@ -66,6 +67,7 @@ export default function LabEntry() {
   const {
     isConnected, isConnecting, isSilent, isMuted,
     status,
+    messages, generatedMedia,
     currentImage, isGeneratingImage,
     whiteboardState, completeWhiteboardStep,
     isMediaFocused, hideMedia,
@@ -103,6 +105,18 @@ export default function LabEntry() {
       disconnect();
     };
   }, []);
+
+  // Auto-save every 2 minutes while connected (in case of unexpected disconnect)
+  useEffect(() => {
+    if (!isConnected) return;
+    const id = setInterval(() => {
+      if (messages.length > 0) {
+        console.log('[Lab] Auto-saving session checkpoint...');
+        saveSession('lab', messages, sessionIdRef.current, undefined, generatedMedia, true);
+      }
+    }, 2 * 60 * 1000); // 2 minutes
+    return () => clearInterval(id);
+  }, [isConnected, messages, generatedMedia, saveSession]);
 
   const stopVideo = () => {
     stopVideoCapture();
@@ -275,8 +289,8 @@ Then wait for the user to respond before continuing.`;
 
   const handleEndSession = () => {
     stopVideo();
-    disconnect();
-    navigate(`/summary?sessionId=${sessionIdRef.current}&mode=lab`);
+    disconnect(); // triggers onSessionEnd → saveSession() runs in background
+    navigate('/');
   };
 
   return (

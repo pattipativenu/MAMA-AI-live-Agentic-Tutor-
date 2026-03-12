@@ -288,17 +288,31 @@ export default function TutorChat() {
     const textChatSessionIdRef = useRef<string>(Date.now().toString());
     
     // Auto-save text chat sessions when leaving
+    // Use a ref to track latest messages so cleanup always has current data
+    const messagesForSaveRef = useRef(messages);
+    messagesForSaveRef.current = messages;
+
     useEffect(() => {
-        return () => {
-            // Save text chat session on unmount if there are messages
-            if (messages.length > 1) { // > 1 because first message is the greeting
-                const sessionMessages: SessionMessage[] = messages.map(m => ({
+        const saveTextChatSession = () => {
+            const msgs = messagesForSaveRef.current;
+            if (msgs.length > 1) { // > 1 because first message is the greeting
+                const sessionMessages: SessionMessage[] = msgs.map(m => ({
                     role: m.role === 'model' ? 'ai' : 'user',
                     text: m.text,
                     image: m.imageUrl
                 }));
                 saveSession('tutor', sessionMessages, textChatSessionIdRef.current);
             }
+        };
+
+        // Also save on page unload (covers browser close/refresh)
+        const handleBeforeUnload = () => saveTextChatSession();
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            // Save on component unmount (navigation within app)
+            saveTextChatSession();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);

@@ -226,11 +226,8 @@ export function hasUserCommunication(messages: SessionMessage[]): boolean {
   const nonSystemMessages = filterSystemMessages(messages);
   const userMessages = nonSystemMessages.filter(m => m.role === 'user');
   
-  // Must have at least one user message with actual content
-  return userMessages.some(m => 
-    m.text.trim().length > 0 && 
-    m.text.trim().length > 2  // More than just "hi" or "ok"
-  );
+  // Must have at least one user message with actual content (any non-empty text)
+  return userMessages.some(m => m.text.trim().length > 0);
 }
 
 /**

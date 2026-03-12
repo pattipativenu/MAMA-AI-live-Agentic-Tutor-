@@ -107,8 +107,8 @@ export default function ExamEntry() {
   // Stable session ID — generated once at mount
   const sessionIdRef = useRef(Date.now().toString());
 
-  // Textbook selection state - DISABLED for direct entry like TutorChat
-  const [showTextbookSelector, setShowTextbookSelector] = useState(false);
+  // Textbook selection state — shown on entry so students can choose subject/chapter
+  const [showTextbookSelector, setShowTextbookSelector] = useState(true);
   const [examContext, setExamContext] = useState<ExamContext>({});
 
   // Concept hooks produced by evaluation
@@ -123,7 +123,7 @@ export default function ExamEntry() {
   const {
     isConnected, isConnecting, isSilent, isMuted,
     status,
-    messages, currentImage, isGeneratingImage,
+    messages, generatedMedia, currentImage, isGeneratingImage,
     whiteboardState, completeWhiteboardStep,
     isMediaFocused, hideMedia,
     connect, disconnect, toggleMute, sendClientMessage,
@@ -190,6 +190,18 @@ export default function ExamEntry() {
     // Advance immediately — CarouselViewer shows a spinner until slides load
     jumpToStep('carousel_playback');
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-save every 2 minutes while connected (in case of unexpected disconnect)
+  useEffect(() => {
+    if (!isConnected) return;
+    const id = setInterval(() => {
+      if (messages.length > 0) {
+        console.log('[Exam] Auto-saving session checkpoint...');
+        saveSession('exam', messages, sessionIdRef.current, undefined, generatedMedia, true);
+      }
+    }, 2 * 60 * 1000); // 2 minutes
+    return () => clearInterval(id);
+  }, [isConnected, messages, generatedMedia, saveSession]);
 
   // ── Subscribe to Firestore session for live slide updates ───────────────
   useEffect(() => {
@@ -395,8 +407,8 @@ Then wait for the user to respond before continuing.`;
   };
 
   const handleEndExam = () => {
-    disconnect(); // triggers saveSession callback
-    navigate(`/summary?sessionId=${sessionIdRef.current}&mode=exam`);
+    disconnect(); // triggers onSessionEnd → saveSession() runs in background
+    navigate('/');
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -520,18 +532,16 @@ Then wait for the user to respond before continuing.`;
       {/* ── Main Visual Area ─────────────────────────────────────────────── */}
       <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6 pt-24">
 
-        {/* Live Video Feed (when camera is active) */}
-        {isVideoActive && (
-          <div className="absolute inset-0">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          </div>
-        )}
+        {/* Live Video Feed — always in DOM so videoRef is valid when startVideo() sets srcObject */}
+        <div className={`absolute inset-0 transition-opacity duration-300 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover"
+          />
+        </div>
 
         {/* Camera error banner */}
         {cameraError && (
