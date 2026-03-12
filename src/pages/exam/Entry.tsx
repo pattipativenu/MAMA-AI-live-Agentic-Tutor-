@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Mic, MicOff, Image as ImageIcon, Loader2, Camera, X, ArrowRight, Lightbulb, PlayCircle, ChevronLeft,
+  Mic, MicOff, Image as ImageIcon, Loader2, Camera, Video, X, ArrowRight, Lightbulb, PlayCircle, ChevronLeft,
 } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import { WhiteboardView } from '../../components/whiteboard';
@@ -533,7 +533,7 @@ Then wait for the user to respond before continuing.`;
       <main className="flex-1 relative flex items-center justify-center overflow-hidden p-6 pt-24">
 
         {/* Live Video Feed — always in DOM so videoRef is valid when startVideo() sets srcObject */}
-        <div className={`absolute inset-0 transition-opacity duration-300 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className={`absolute inset-0 z-0 transition-opacity duration-300 ${isVideoActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
           <video
             ref={videoRef}
             autoPlay
@@ -659,7 +659,7 @@ Then wait for the user to respond before continuing.`;
                 ? 'bg-teal-500/10 border-teal-400 text-teal-600'
                 : 'bg-zinc-50 border-zinc-200 text-zinc-600 group-hover:bg-zinc-100'
             }`}>
-              <Camera size={24} className={isVideoActive ? 'text-teal-600' : 'text-zinc-600'} />
+              <Video size={24} className={isVideoActive ? 'text-teal-600' : 'text-zinc-600'} />
             </div>
             <span className={`text-xs font-medium ${isVideoActive ? 'text-teal-600' : 'text-zinc-500'}`}>
               {isVideoActive ? 'Live' : 'Video'}
