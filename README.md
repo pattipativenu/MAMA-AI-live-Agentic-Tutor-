@@ -5,12 +5,12 @@
 **Built for the Google Gemini Live Agent Challenge**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-![AI](https://img.shields.io/badge/AI-Gemini_Live_%2B_Gemini_3.1-0B57D0)
-![Image](https://img.shields.io/badge/Image-Nano_Banana_2_(Gemini_3.1_Flash_Image)-4C1)
-![Video](https://img.shields.io/badge/Video-Veo_3_(silent_9%3A16)-8A2BE2)
-![Framework](https://img.shields.io/badge/Framework-React_%2B_Vite-646CFF)
-![Language](https://img.shields.io/badge/Language-TypeScript-3178C6)
-![Backend](https://img.shields.io/badge/Backend-Firebase_(Auth%2FFirestore%2FStorage)-FFCA28)
+[![AI](https://img.shields.io/badge/AI-Gemini_Live_%2B_Gemini_3.1-0B57D0)](https://ai.google.dev/)
+[![Image](https://img.shields.io/badge/Image-Nano_Banana_2_(Gemini_3.1_Flash_Image)-4C1)](https://ai.google.dev/gemini-api/docs/image-generation)
+[![Video](https://img.shields.io/badge/Video-Veo_3_(silent_9%3A16)-8A2BE2)](https://deepmind.google/technologies/veo/)
+[![Framework](https://img.shields.io/badge/Framework-React_%2B_Vite-646CFF)](https://vitejs.dev/)
+[![Language](https://img.shields.io/badge/Language-TypeScript-3178C6)](https://www.typescriptlang.org/)
+[![Backend](https://img.shields.io/badge/Backend-Firebase_(Auth%2FFirestore%2FStorage)-FFCA28)](https://firebase.google.com/)
 
 **Server URL (Cloud Run / deploy)**: `<SET_ME_AFTER_DEPLOY>`  
 **Local dev**: `http://localhost:3000`
