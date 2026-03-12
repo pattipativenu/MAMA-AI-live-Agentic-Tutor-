@@ -4,6 +4,7 @@ import {
   Mic, MicOff, Image as ImageIcon, Loader2, Camera, Video, X, ArrowRight, Lightbulb, PlayCircle, ChevronLeft,
 } from 'lucide-react';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
+import type { GeneratedMedia } from '../../hooks/useGeminiLive';
 import { WhiteboardView } from '../../components/whiteboard';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useAuth } from '../../contexts/AuthContext';
@@ -67,16 +68,12 @@ CRITICAL EXAM RULES:
 
 4. CORRECT & EXPLAIN: When correcting, ALWAYS start with a simple, relatable real-world example tailored to their interests or hobbies BEFORE introducing the formal scientific language or formula. This anchors the concept in something they already understand.
 
-5. VISUAL AIDS (PERMISSION-GATED): Before calling generate_image, ALWAYS ask the student first — e.g. "Do you want me to create an image so you can understand this visually?" or "Want me to draw a diagram of this?" Only call generate_image after the student gives a positive response ("yes", "please", "sure", "go ahead", etc.). Once granted:
-   - Generate 2–4 connected images for the topic (overview, close-up, real-world, optional comparison) — each with a DIFFERENT perspective. Do NOT generate the same image twice.
-   - Tailor visual complexity to their age: young students get simple, fun diagrams; Class 11/12 students get advanced formulas, vectors, or graphs.
-   - NEVER include the text "Class X" or the student's grade level in the image prompt itself.
-   IMAGE SERIES RULE: Call generate_image 2–4 times in sequence: Call 1 — Overview/big-picture, Call 2 — Close-up/detail, Call 3 — Real-world application, Call 4 (optional) — Comparison/process.
+5. VISUAL AIDS (AUTOMATIC): When introducing a new concept, correcting a mistake, or explaining a process — generate images automatically without asking. Generate 2–3 connected images per topic (overview, detail, real-world application). Call generate_image 2–3 times in sequence. Tailor visual complexity to their age.
 
 6. VIDEO (PERMISSION-GATED): Before calling generate_video, ALWAYS ask the student first — e.g. "Do you want me to create a video animation so you can understand this better?" or "Want me to animate this for you?" Only call generate_video after the student gives a positive response. Once granted, generate ONE video. Only generate a second if the student explicitly asks again.
 
-7. WHITEBOARD (PERMISSION-GATED): When a student has a repeated question, makes a mistake, or asks for a deeper explanation involving formulas, equations, geometry, or step-by-step derivations — ASK FIRST: "Do you want me to explain this on the whiteboard?" or "Can I pull up the whiteboard to walk you through this?" Only call add_whiteboard_step after the student says yes. Build ONE step at a time. Pause between steps to ask a check question. Call clear_whiteboard when moving to a new problem.
-   WHITEBOARD + MEDIA: After the student has approved image generation, you may use show_media(-1) mid-whiteboard to show the visual briefly, then call hide_media() to return to the board.
+7. WHITEBOARD (AUTOMATIC): When a student makes a mistake involving a formula, equation, geometry, or step-by-step derivation — use the whiteboard automatically without asking. Call add_whiteboard_step immediately. Build ONE step at a time. Pause between steps to ask a check question. Call clear_whiteboard when moving to a new problem.
+   WHITEBOARD + MEDIA: You may use show_media(-1) mid-whiteboard to show the visual briefly, then call hide_media() to return to the board.
 
 8. QUIZ & VERIFY: After every explanation or correction, ask a short follow-up question to confirm understanding. If the student answers incorrectly again, gently point out what they got right, where they went wrong, and walk through it once more.
 
@@ -118,6 +115,7 @@ export default function ExamEntry() {
   const [asyncSlides, setAsyncSlides] = useState<CarouselSlide[]>([]);
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<GeneratedMedia | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
@@ -639,6 +637,27 @@ Then wait for the user to respond before continuing.`;
         )}
       </main>
 
+      {/* Media gallery strip */}
+      {generatedMedia.length > 0 && (
+        <div className="flex gap-2 px-4 py-2 overflow-x-auto bg-black/30 backdrop-blur-sm">
+          {generatedMedia.map((media, idx) => (
+            <button
+              key={idx}
+              onClick={() => setSelectedMedia(media)}
+              className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 border-white/40 hover:border-white/80 transition-colors"
+            >
+              {media.type === 'image' ? (
+                <img src={media.url} alt={`Generated ${idx + 1}`} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+                  <span className="text-white text-xs">▶</span>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Bottom Controls ──────────────────────────────────────────────── */}
       <div className="bg-white border-t border-zinc-200 p-6 pb-8 z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
         <div className="flex items-center justify-center gap-10 max-w-md mx-auto">
@@ -688,6 +707,35 @@ Then wait for the user to respond before continuing.`;
 
         </div>
       </div>
+
+      {/* Fullscreen media viewer */}
+      {selectedMedia && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+          onClick={() => setSelectedMedia(null)}
+        >
+          {selectedMedia.type === 'image' ? (
+            <img
+              src={selectedMedia.url}
+              alt="Generated visual"
+              className="max-w-full max-h-full object-contain p-4"
+            />
+          ) : (
+            <video
+              src={selectedMedia.url}
+              autoPlay
+              controls
+              className="max-w-full max-h-full p-4"
+            />
+          )}
+          <button
+            className="absolute top-4 right-4 text-white text-2xl bg-black/50 rounded-full w-10 h-10 flex items-center justify-center"
+            onClick={() => setSelectedMedia(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }
