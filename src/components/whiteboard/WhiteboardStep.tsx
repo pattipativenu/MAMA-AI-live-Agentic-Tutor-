@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import 'katex/dist/katex.min.css';
-import { InlineMath } from 'react-katex';
+import { BlockMath } from 'react-katex';
 import { Volume2 } from 'lucide-react';
 
 interface WhiteboardStepProps {
@@ -15,11 +15,6 @@ interface WhiteboardStepProps {
   highlightedTerms?: string[]; // Terms to highlight in orange
 }
 
-// Natural typing speed - varies slightly for realistic effect
-const getTypingDelay = () => {
-  // Random delay between 15-35ms for natural variation
-  return Math.floor(Math.random() * 20) + 15;
-};
 
 export default function WhiteboardStep({
   stepNumber,
@@ -32,95 +27,51 @@ export default function WhiteboardStep({
   isHighlighted = false,
   highlightedTerms = [],
 }: WhiteboardStepProps) {
-  const [displayedMath, setDisplayedMath] = useState('');
   const [displayedExplanation, setDisplayedExplanation] = useState('');
   const [showDecode, setShowDecode] = useState(false);
-  const hasCompleted = useRef(false);
-  const mathTypedRef = useRef(false);
 
   // Reset when status goes back to pending
   useEffect(() => {
     if (status === 'pending') {
-      setDisplayedMath('');
       setDisplayedExplanation('');
       setShowDecode(false);
-      hasCompleted.current = false;
-      mathTypedRef.current = false;
     }
   }, [status]);
 
   // Instant display when already complete
   useEffect(() => {
     if (status === 'complete') {
-      setDisplayedMath(math);
       setDisplayedExplanation(explanation);
       setShowDecode(true);
     }
-  }, [status, math, explanation]);
+  }, [status, explanation]);
 
-  // Natural typing animation for math formula first, then explanation
+  // Typing animation — explanation only, math shown only on complete
   useEffect(() => {
-    if (status !== 'typing') return;
-
-    hasCompleted.current = false;
-    mathTypedRef.current = false;
-    setDisplayedMath('');
+    if (status !== 'typing') {
+      setDisplayedExplanation('');
+      return;
+    }
     setDisplayedExplanation('');
-    setShowDecode(false);
-
-    // Type math first, then explanation
-    let mathIndex = 0;
-    let explanationIndex = 0;
-    
-    const typeNextChar = () => {
-      // Type math formula character by character
-      if (!mathTypedRef.current && math) {
-        if (mathIndex < math.length) {
-          mathIndex++;
-          setDisplayedMath(math.slice(0, mathIndex));
-          setTimeout(typeNextChar, getTypingDelay());
-          return;
-        } else {
-          mathTypedRef.current = true;
-          // Small pause after math before starting explanation
-          setTimeout(typeNextChar, 200);
-          return;
-        }
-      }
-      
-      // Then type explanation
-      if (explanation) {
-        if (explanationIndex < explanation.length) {
-          // Type words more naturally - sometimes 1 char, sometimes 2-3
-          const chunkSize = Math.random() > 0.7 ? 2 : 1;
-          explanationIndex = Math.min(explanationIndex + chunkSize, explanation.length);
-          setDisplayedExplanation(explanation.slice(0, explanationIndex));
-          setTimeout(typeNextChar, getTypingDelay());
-          return;
-        }
-      }
-      
-      // Typing complete
-      setShowDecode(true);
-      if (!hasCompleted.current) {
-        hasCompleted.current = true;
+    let i = 0;
+    const timer = setInterval(() => {
+      if (i >= explanation.length) {
+        clearInterval(timer);
+        setShowDecode(true);
         onTypingComplete?.();
+        return;
       }
-    };
-
-    // Start typing
-    typeNextChar();
-
-    return () => {
-      // Cleanup handled by the recursive timeout pattern
-    };
-  }, [status, math, explanation]); // Re-run when status changes to 'typing'
+      setDisplayedExplanation(explanation.slice(0, ++i));
+    }, 22);
+    return () => clearInterval(timer);
+  }, [status, explanation]);
 
   const renderMath = () => {
-    if (!math) {
-      return <span className="text-zinc-400 italic text-sm">Formula loading...</span>;
+    try {
+      return <BlockMath math={math} />;
+    } catch {
+      return <code className="text-xs text-zinc-300 break-all">{math}</code>;
     }
-    return <InlineMath math={displayedMath || math} errorColor="#dc2626" />;
   };
 
   // Render explanation with orange highlighting for key terms
@@ -190,22 +141,17 @@ export default function WhiteboardStep({
       </div>
 
       <div className="space-y-2">
-        {/* Math formula - appears as if being written */}
-        {math && (
-          <div className={`text-zinc-800 text-lg overflow-x-auto transition-opacity duration-300 ${
-            displayedMath || status === 'complete' ? 'opacity-100' : 'opacity-0'
-          }`}>
+        {/* Math formula - shown only when complete to avoid partial KaTeX render errors */}
+        {status === 'complete' && math && (
+          <div className="text-zinc-800 text-lg overflow-x-auto transition-opacity duration-300 opacity-100">
             {renderMath()}
-            {status === 'typing' && displayedMath.length < math.length && (
-              <span className="inline-block w-0.5 h-5 bg-amber-500 ml-0.5 animate-pulse align-middle" />
-            )}
           </div>
         )}
 
         {/* Explanation text - typewriter style with natural flow and orange highlighting */}
         {explanation && (
-          <p className="text-zinc-600 text-sm leading-relaxed">
-            {renderExplanation(displayedExplanation)}
+          <p className="text-sm text-zinc-300 leading-relaxed">
+            {renderExplanation(status === 'typing' ? displayedExplanation : explanation)}
             {status === 'typing' && displayedExplanation.length < explanation.length && (
               <span className="inline-block w-0.5 h-4 bg-amber-500 ml-0.5 animate-pulse align-middle" />
             )}
