@@ -774,7 +774,6 @@ export function useGeminiLive(
 
                     let base64Image: string | null = null;
                     let mimeType = 'image/png';
-                    let lastError: any = null;
 
                     for (let attempt = 1; attempt <= 3; attempt++) {
                       try {
@@ -795,7 +794,6 @@ export function useGeminiLive(
                         }
                         break; // success — exit retry loop
                       } catch (err: any) {
-                        lastError = err;
                         const isRetryable = err?.status === 503 || err?.status === 429 ||
                           err?.message?.includes('503') || err?.message?.includes('unavailable');
                         if (attempt < 3 && isRetryable) {
