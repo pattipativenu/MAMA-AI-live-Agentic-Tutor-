@@ -7,6 +7,8 @@ import { WhiteboardState, WhiteboardStep, DEFAULT_WHITEBOARD_STATE } from '../ty
 import { parseWhiteboardChunk, cleanWhiteboardMarkers, stepToChatMessage } from '../utils/whiteboardParser';
 import { startVideoGenerationJob, subscribeToVideoJobs, VideoJob } from '../services/videoGen';
 import { getAuth } from 'firebase/auth';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { storage } from '../firebase';
 
 export interface GeneratedMedia {
   type: 'image' | 'video';
@@ -113,6 +115,17 @@ export function useGeminiLive(
   // Track last AI message addition to prevent duplicates between text parts and audio transcription
   const lastAiMessageRef = useRef<{ text: string; timestamp: number } | null>(null);
 
+  // Silence detection for audioStreamEnd (Gemini docs: send audioStreamEnd after 1s of silence)
+  const silentFrameCountRef = useRef(0);
+  const audioStreamEndSentRef = useRef(false);
+  const SILENCE_THRESHOLD = 0.005;
+  // ~1 second of silence at 16kHz with 4096 buffer = ~4 frames
+  const SILENCE_FRAMES_BEFORE_END = 4;
+
+  // Session duration tracking
+  const sessionStartTimeRef = useRef<number>(0);
+  const sessionTimerRef = useRef<number | null>(null);
+
   // Update ref immediately whenever messages change
   const updateMessages = useCallback((newMessages: SessionMessage[] | ((prev: SessionMessage[]) => SessionMessage[])) => {
     setMessages(prev => {
@@ -198,6 +211,12 @@ export function useGeminiLive(
     if (statusTimeoutRef.current) {
       window.clearTimeout(statusTimeoutRef.current);
       statusTimeoutRef.current = null;
+    }
+
+    // Clear session duration timer
+    if (sessionTimerRef.current) {
+      window.clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = null;
     }
 
     // IMPORTANT: Stop audio/video capture BEFORE closing WebSocket
@@ -467,33 +486,72 @@ export function useGeminiLive(
       }
 
       // 3. Connect to Gemini Live API with selected voice
-      // Original configuration that was working before
-      const liveModel = mode === 'tutor'
-        ? 'gemini-2.5-flash-native-audio-preview-12-2025'
-        : 'gemini-2.5-flash-native-audio-latest';
+      // Use the current native‑audio Live model that supports tools +
+      // bidiGenerateContent over WebSockets.
+      //
+      // NOTE:
+      // - Older models like `gemini-2.0-flash-live-001` are no longer
+      //   available for the v1beta Live API and will trigger errors like:
+      //   "model ... is not found for API version v1beta, or is not
+      //    supported for bidiGenerateContent. Call ListModels to see
+      //    which models are available."
+      // - `gemini-2.5-flash-native-audio-preview-12-2025` is the correct
+      //   native-audio model for Google AI Studio (v1beta endpoint).
+      //   Native audio models ONLY support Modality.AUDIO — adding
+      //   Modality.TEXT causes an immediate 1008 WebSocket disconnect.
+      const liveModel = 'gemini-2.5-flash-native-audio-preview-12-2025';
       const sessionPromise = ai.live.connect({
         model: liveModel,
         config: {
           tools: [{ functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration, showMediaDeclaration, hideMediaDeclaration] }],
-          responseModalities: [Modality.AUDIO, Modality.TEXT],
+          responseModalities: [Modality.AUDIO],
           speechConfig: {
-            voiceConfig: { 
-              prebuiltVoiceConfig: { 
-                voiceName: VOICE_NAME_MAP[voiceName] 
-              } 
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: VOICE_NAME_MAP[voiceName]
+              }
             }
           },
           systemInstruction: finalSystemInstruction,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
+          contextWindowCompression: { slidingWindow: {} },
         },
         callbacks: {
           onopen: () => {
             console.log("[GeminiLive] WebSocket connection OPEN");
+            // Reset reconnection attempts on successful connection
+            reconnectAttemptsRef.current = 0;
             setIsConnected(true);
             setIsConnecting(false);
             isConnectingRef.current = false;
             setStatus('listening');
+
+            // Track session start for duration limits
+            sessionStartTimeRef.current = Date.now();
+            // Clear any existing timer
+            if (sessionTimerRef.current) {
+              window.clearInterval(sessionTimerRef.current);
+            }
+            // Check session duration every 30 seconds
+            // Gemini Live limits: 15 min audio-only, 2 min with video
+            const maxDuration = videoElement ? 2 * 60 * 1000 : 15 * 60 * 1000;
+            const warnAt = maxDuration - 60 * 1000; // Warn 1 min before
+            sessionTimerRef.current = window.setInterval(() => {
+              const elapsed = Date.now() - sessionStartTimeRef.current;
+              if (elapsed >= warnAt && elapsed < maxDuration) {
+                console.warn(`[GeminiLive] Session nearing limit: ${Math.round(elapsed / 1000)}s / ${Math.round(maxDuration / 1000)}s`);
+              }
+              if (elapsed >= maxDuration) {
+                console.warn('[GeminiLive] Session duration limit reached, reconnecting...');
+                if (sessionTimerRef.current) {
+                  window.clearInterval(sessionTimerRef.current);
+                  sessionTimerRef.current = null;
+                }
+                // Trigger reconnection instead of hard disconnect
+                disconnect('reconnecting');
+              }
+            }, 30000);
 
             if (initialImage) {
               try {
@@ -520,6 +578,10 @@ export function useGeminiLive(
             processorRef.current = processor;
 
             let packetCount = 0;
+            // Reset silence tracking for new session
+            silentFrameCountRef.current = 0;
+            audioStreamEndSentRef.current = false;
+
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               if (isMutedRef.current) return;
@@ -542,6 +604,25 @@ export function useGeminiLive(
                 }
               }
 
+              // Silence detection: send audioStreamEnd after ~1s of silence
+              // per Gemini docs to flush cached audio
+              if (rms < SILENCE_THRESHOLD) {
+                silentFrameCountRef.current++;
+                if (silentFrameCountRef.current >= SILENCE_FRAMES_BEFORE_END && !audioStreamEndSentRef.current) {
+                  audioStreamEndSentRef.current = true;
+                  sessionPromise.then((session) => {
+                    if (session && sessionRef.current === session && !isCleaningUpRef.current) {
+                      try {
+                        session.sendRealtimeInput({ audioStreamEnd: true });
+                      } catch (_) { /* ignore */ }
+                    }
+                  });
+                }
+              } else {
+                silentFrameCountRef.current = 0;
+                audioStreamEndSentRef.current = false;
+              }
+
               sessionPromise.then((session) => {
                 // Guard: Only send if session exists and not cleaning up
                 if (session && sessionRef.current === session && !isCleaningUpRef.current) {
@@ -550,7 +631,6 @@ export function useGeminiLive(
                       media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
                     });
                   } catch (err: any) {
-                    // Completely suppress all errors during cleanup
                     if (!isCleaningUpRef.current) {
                       console.warn('[GeminiLive] Audio send error:', err.message);
                     }
@@ -681,28 +761,48 @@ export function useGeminiLive(
                     const imageAi = new GoogleGenAI({ apiKey: getApiKey() });
                     const imageResponse = await imageAi.models.generateContent({
                       model: 'gemini-3.1-flash-image-preview',
-                      contents: { parts: [{ text: prompt + '\n\nCRITICAL: Generate in 9:16 portrait format (tall, vertical). Height is greater than width.' }] },
+                      contents: { parts: [{ text: prompt }] },
                       config: {
                         responseModalities: ['TEXT', 'IMAGE'],
                       }
                     });
 
                     let base64Image = '';
+                    let mimeType = 'image/png';
                     for (const part of imageResponse.candidates?.[0]?.content?.parts || []) {
                       if (part.inlineData) {
-                        base64Image = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                        mimeType = part.inlineData.mimeType || 'image/png';
+                        base64Image = `data:${mimeType};base64,${part.inlineData.data}`;
                         break;
                       }
                     }
 
                     if (base64Image) {
+                      // Show immediately in UI (data URI for instant display)
                       setCurrentImage(base64Image);
+
+                      // Upload to Firebase Storage to avoid Firestore 1MB limit
+                      let storageUrl = base64Image; // fallback to data URI
+                      try {
+                        const userId = getAuth().currentUser?.uid;
+                        if (userId) {
+                          const storagePath = `users/${userId}/generated/images/${Date.now()}.${mimeType.split('/')[1] || 'png'}`;
+                          const storageRef = ref(storage, storagePath);
+                          const rawBase64 = base64Image.split(',')[1];
+                          await uploadString(storageRef, rawBase64, 'base64', { contentType: mimeType });
+                          storageUrl = await getDownloadURL(storageRef);
+                          console.log('[GeminiLive] Image uploaded to Storage:', storageUrl);
+                        }
+                      } catch (uploadErr) {
+                        console.warn('[GeminiLive] Image upload to Storage failed, using data URI:', uploadErr);
+                      }
+
                       let newIndex = 0;
                       setGeneratedMedia(prev => {
                         newIndex = prev.length;
                         const mediaItem: GeneratedMedia = {
                           type: 'image',
-                          url: base64Image,
+                          url: storageUrl, // Use Storage URL for persistence
                           prompt,
                           timestamp: Date.now(),
                           caption: 'Generated visual aid'
@@ -714,9 +814,9 @@ export function useGeminiLive(
                       updateMessages(prev => {
                         const last = prev[prev.length - 1];
                         if (last && last.role === 'ai') {
-                          return [...prev.slice(0, -1), { ...last, image: base64Image }];
+                          return [...prev.slice(0, -1), { ...last, image: storageUrl }];
                         }
-                        return [...prev, { role: 'ai', text: '', image: base64Image }];
+                        return [...prev, { role: 'ai', text: '', image: storageUrl }];
                       });
                       return { id: call.id, name: call.name, response: { success: true, message: `Image generated and added to media gallery at index ${newIndex}. You can show it mid-whiteboard with show_media(${newIndex}).` } };
                     } else {
@@ -724,6 +824,12 @@ export function useGeminiLive(
                     }
                   } catch (e: any) {
                     console.error("[GeminiLive] Image generation error:", e);
+                    // Add user-facing error feedback
+                    updateMessages(prev => [...prev, {
+                      role: 'ai' as const,
+                      text: `I tried to generate an image but encountered an error: ${e.message}`,
+                      timestamp: Date.now()
+                    }]);
                     return { id: call.id, name: call.name, response: { success: false, message: e.message } };
                   } finally {
                     setIsGeneratingImage(false);
@@ -806,6 +912,12 @@ export function useGeminiLive(
                     };
                   } catch (e: any) {
                     console.error("[GeminiLive] Video generation error:", e);
+                    // Add user-facing error feedback in the chat
+                    updateMessages(prev => [...prev, {
+                      role: 'ai' as const,
+                      text: `I tried to generate a video animation but ran into an issue: ${e.message}. I'll continue explaining without the video.`,
+                      timestamp: Date.now()
+                    }]);
                     return { id: call.id, name: call.name, response: { success: false, message: e.message } };
                   } finally {
                     setStatus('explaining');
@@ -868,22 +980,29 @@ export function useGeminiLive(
                     lastAiMessageRef.current = { text: part.text, timestamp: now };
                   }
                 }
-                if (part.inlineData && part.inlineData.data && playbackContextRef.current) {
+                if (part.inlineData && part.inlineData.data && playbackContextRef.current
+                    && playbackContextRef.current.state !== 'closed') {
                   if (playbackContextRef.current.state === 'suspended') {
-                    playbackContextRef.current.resume();
+                    playbackContextRef.current.resume().catch(() => {
+                      console.warn('[GeminiLive] Failed to resume playback context');
+                    });
                   }
 
-                  const float32Data = pcm16Base64ToFloat32(part.inlineData.data);
-                  const audioBuffer = playbackContextRef.current.createBuffer(1, float32Data.length, 24000);
-                  audioBuffer.getChannelData(0).set(float32Data);
+                  try {
+                    const float32Data = pcm16Base64ToFloat32(part.inlineData.data);
+                    const audioBuffer = playbackContextRef.current.createBuffer(1, float32Data.length, 24000);
+                    audioBuffer.getChannelData(0).set(float32Data);
 
-                  const source = playbackContextRef.current.createBufferSource();
-                  source.buffer = audioBuffer;
-                  source.connect(playbackContextRef.current.destination);
+                    const source = playbackContextRef.current.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(playbackContextRef.current.destination);
 
-                  const startTime = Math.max(playbackContextRef.current.currentTime, nextPlayTimeRef.current);
-                  source.start(startTime);
-                  nextPlayTimeRef.current = startTime + audioBuffer.duration;
+                    const startTime = Math.max(playbackContextRef.current.currentTime, nextPlayTimeRef.current);
+                    source.start(startTime);
+                    nextPlayTimeRef.current = startTime + audioBuffer.duration;
+                  } catch (audioErr) {
+                    console.warn('[GeminiLive] Audio playback error:', audioErr);
+                  }
                 }
               }
             }
@@ -1012,9 +1131,8 @@ export function useGeminiLive(
                 const now = Date.now();
                 const recentText = lastAiMessageRef.current?.text || '';
                 const isDuplicate = recentText && (
-                  recentText.includes(cleanText) || 
-                  cleanText.includes(recentText) ||
-                  (now - (lastAiMessageRef.current?.timestamp || 0) < 1000)
+                  recentText.includes(cleanText) ||
+                  cleanText.includes(recentText)
                 );
                 
                 if (!isDuplicate) {
@@ -1031,27 +1149,34 @@ export function useGeminiLive(
             }
 
             if (message.serverContent?.interrupted) {
-              console.log("[GeminiLive] Interrupted.");
+              console.log("[GeminiLive] Interrupted - clearing audio queue.");
               setStatus('listening');
               currentAiTextRef.current = '';
-              if (playbackContextRef.current) {
-                playbackContextRef.current.close();
-                const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-                playbackContextRef.current = new AudioContextClass({ sampleRate: 24000 });
+              // FIX: Don't destroy the AudioContext on interrupt. Closing it kills
+              // all audio nodes and can cause subsequent audio to fail silently.
+              // Instead, just reset the playback time so future audio starts
+              // immediately (effectively clearing the queued audio).
+              if (playbackContextRef.current && playbackContextRef.current.state !== 'closed') {
                 nextPlayTimeRef.current = playbackContextRef.current.currentTime;
               }
             }
           },
-          onclose: () => {
-            console.log("[GeminiLive] WebSocket connection CLOSED");
+          onclose: (event?: CloseEvent) => {
+            console.log("[GeminiLive] WebSocket connection CLOSED", event?.code, event?.reason);
             
-            // Check if this was an unexpected closure (not intentional)
-            if (!isIntentionalDisconnectRef.current && 
-                reconnectAttemptsRef.current < maxReconnectAttempts &&
-                connectionParamsRef.current) {
-              
-              console.log(`[GeminiLive] Unexpected closure. Attempting auto-reconnect (${reconnectAttemptsRef.current + 1}/${maxReconnectAttempts})...`);
+            // Circuit breaker: Don't reconnect if:
+            // 1. This was an intentional disconnect
+            // 2. We're already trying to connect (prevents race conditions)
+            // 3. Max reconnect attempts reached
+            // 4. No connection params available
+            const shouldReconnect = !isIntentionalDisconnectRef.current && 
+                                    !isConnectingRef.current &&
+                                    reconnectAttemptsRef.current < maxReconnectAttempts &&
+                                    connectionParamsRef.current;
+            
+            if (shouldReconnect) {
               reconnectAttemptsRef.current++;
+              console.log(`[GeminiLive] Unexpected closure. Attempting auto-reconnect (${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`);
               
               // Show reconnection status
               setStatus('thinking');
@@ -1060,25 +1185,39 @@ export function useGeminiLive(
               const contextMessages = [...messagesRef.current];
               const { systemInstruction, initialImage, videoElement } = connectionParamsRef.current;
               
-              // Wait briefly then reconnect
+              // Clear session ref immediately to prevent any stale references
+              sessionRef.current = null;
+              
+              // Exponential backoff: 2s, 4s, 6s delays
+              const backoffDelay = 2000 * reconnectAttemptsRef.current;
+              
               setTimeout(() => {
-                console.log('[GeminiLive] Reconnecting with', contextMessages.length, 'messages of context');
-                connect(systemInstruction, contextMessages, initialImage, videoElement)
-                  .then(() => {
-                    console.log('[GeminiLive] Auto-reconnect successful');
-                    reconnectAttemptsRef.current = 0;
-                  })
-                  .catch(err => {
-                    console.error('[GeminiLive] Auto-reconnect failed:', err);
-                    // If max attempts reached, do full disconnect
-                    if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-                      console.log('[GeminiLive] Max reconnection attempts reached');
-                      disconnect('max_reconnect_attempts');
-                    }
-                  });
-              }, 1500);
+                // Double-check we're still not connected before attempting
+                if (!sessionRef.current && !isConnectingRef.current) {
+                  console.log('[GeminiLive] Reconnecting with', contextMessages.length, 'messages of context');
+                  connect(systemInstruction, contextMessages, initialImage, videoElement)
+                    .catch(err => {
+                      console.error('[GeminiLive] Auto-reconnect attempt failed:', err);
+                      // Note: onclose will be called again if connect fails, which will trigger next retry
+                      // or give up if max attempts reached
+                    });
+                } else {
+                  console.log('[GeminiLive] Skipping reconnect - already connected or connecting');
+                }
+              }, backoffDelay);
             } else {
-              // Intentional disconnect or max retries reached
+              // Log why we're not reconnecting
+              if (isIntentionalDisconnectRef.current) {
+                console.log('[GeminiLive] Intentional disconnect - not reconnecting');
+              } else if (isConnectingRef.current) {
+                console.log('[GeminiLive] Already connecting - skipping duplicate reconnect');
+              } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+                console.error('[GeminiLive] Max reconnect attempts reached. Giving up.');
+              } else if (!connectionParamsRef.current) {
+                console.log('[GeminiLive] No connection params - cannot reconnect');
+              }
+              
+              // Full cleanup
               disconnect();
             }
           },
