@@ -150,16 +150,32 @@ export async function generateEducationalVideo(
   console.log(`[VideoGen] Prompt length: ${prompt.length} chars`);
 
   try {
+    // Check if Veo 3 is available (skip if not)
+    console.log(`[VideoGen] Checking Veo 3 availability...`);
+    
     // Start video generation with Veo 3 (silent; Gemini narrates via Live API)
-    const operation = await ai.models.generateVideos({
-      model: VEO_MODEL,
-      prompt,
-      config: {
-        aspectRatio,
-        personGeneration,
-        generateAudio: false
+    let operation;
+    try {
+      operation = await ai.models.generateVideos({
+        model: VEO_MODEL,
+        prompt,
+        config: {
+          aspectRatio,
+          personGeneration,
+          generateAudio: false
+        }
+      });
+    } catch (veoError: any) {
+      if (veoError.message?.includes('404') || veoError.message?.includes('not found')) {
+        console.error('[VideoGen] Veo 3 model not found (404). Your project may not have access to Veo 3 yet.');
+        console.error('[VideoGen] To enable Veo 3:');
+        console.error('  1. Go to Google Cloud Console > Vertex AI > Models');
+        console.error('  2. Search for "Veo 3" and request access');
+        console.error('  3. Approval typically takes 1-3 business days');
+        throw new Error('Veo 3 not available. Please request access in Google Cloud Console or use image generation instead.');
       }
-    });
+      throw veoError;
+    }
 
     // Poll for completion
     let completedOperation = operation;

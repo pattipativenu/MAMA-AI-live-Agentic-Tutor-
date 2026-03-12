@@ -148,32 +148,40 @@ QUALITY BAR: This image should be so vivid and self-explanatory that a student i
 async function attemptGeneration(modelName: string, prompt: string): Promise<string> {
   console.log(`[ImageGen] Trying model: ${modelName}`);
 
-  const response = await ai.models.generateContent({
-    model: modelName,
-    contents: prompt,
-    config: {
-      responseModalities: ['TEXT', 'IMAGE'],
-    },
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      config: {
+        responseModalities: ['TEXT', 'IMAGE'],
+      },
+    });
 
-  const imagePart = response.candidates?.[0]?.content?.parts?.find(
-    (p: any) => p.inlineData || p.fileData
-  );
-
-  if (imagePart?.inlineData?.data) {
-    const mimeType = imagePart.inlineData.mimeType || 'image/png';
-    return `data:${mimeType};base64,${imagePart.inlineData.data}`;
-  }
-
-  if (imagePart?.fileData?.fileUri) {
-    throw new Error(
-      `Model returned a fileURI (${imagePart.fileData.fileUri}) rather than inline base64 data. We need base64 for direct browser rendering.`
+    const imagePart = response.candidates?.[0]?.content?.parts?.find(
+      (p: any) => p.inlineData || p.fileData
     );
-  }
 
-  throw new Error(
-    `Model ${modelName} returned successfully but contained no valid image data in the parts array.`
-  );
+    if (imagePart?.inlineData?.data) {
+      const mimeType = imagePart.inlineData.mimeType || 'image/png';
+      return `data:${mimeType};base64,${imagePart.inlineData.data}`;
+    }
+
+    if (imagePart?.fileData?.fileUri) {
+      throw new Error(
+        `Model returned a fileURI (${imagePart.fileData.fileUri}) rather than inline base64 data. We need base64 for direct browser rendering.`
+      );
+    }
+
+    throw new Error(
+      `Model ${modelName} returned successfully but contained no valid image data in the parts array.`
+    );
+  } catch (error: any) {
+    if (error.message?.includes('404') || error.status === 404) {
+      console.error(`[ImageGen] Model ${modelName} not found (404).`);
+      console.error(`[ImageGen] This model may not be available in your region or project.`);
+    }
+    throw error;
+  }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
