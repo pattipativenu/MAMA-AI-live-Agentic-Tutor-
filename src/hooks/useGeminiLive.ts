@@ -313,12 +313,20 @@ export function useGeminiLive(
       setIsMuted(false);
       setIsSilent(false);
       
+      // Snapshot media before any reset so we can restore it on reconnect
+      const mediaToPreserve = generatedMediaRef.current;
+
       // Only clear messages if not reconnecting with previous messages
       if (!previousMessages || previousMessages.length === 0) {
         setMessages([]);
         messagesRef.current = [];
         generatedMediaRef.current = [];
         setGeneratedMedia([]);
+      }
+
+      // Restore gallery if this is a reconnect (previousMessages supplied and non-empty)
+      if (previousMessages && previousMessages.length > 0 && mediaToPreserve.length > 0) {
+        setGeneratedMedia(mediaToPreserve);
       }
       
       setCurrentImage(null);
@@ -763,21 +771,39 @@ export function useGeminiLive(
                   setIsGeneratingImage(true);
                   try {
                     const imageAi = new GoogleGenAI({ apiKey: getApiKey() });
-                    const imageResponse = await imageAi.models.generateContent({
-                      model: 'gemini-3.1-flash-image-preview',
-                      contents: { parts: [{ text: prompt }] },
-                      config: {
-                        responseModalities: ['TEXT', 'IMAGE'],
-                      }
-                    });
 
-                    let base64Image = '';
+                    let base64Image: string | null = null;
                     let mimeType = 'image/png';
-                    for (const part of imageResponse.candidates?.[0]?.content?.parts || []) {
-                      if (part.inlineData) {
-                        mimeType = part.inlineData.mimeType || 'image/png';
-                        base64Image = `data:${mimeType};base64,${part.inlineData.data}`;
-                        break;
+                    let lastError: any = null;
+
+                    for (let attempt = 1; attempt <= 3; attempt++) {
+                      try {
+                        const imageResponse = await imageAi.models.generateContent({
+                          model: 'gemini-3.1-flash-image-preview',
+                          contents: { parts: [{ text: prompt }] },
+                          config: {
+                            responseModalities: ['TEXT', 'IMAGE'],
+                          }
+                        });
+
+                        for (const part of imageResponse.candidates?.[0]?.content?.parts || []) {
+                          if (part.inlineData) {
+                            mimeType = part.inlineData.mimeType || 'image/png';
+                            base64Image = `data:${mimeType};base64,${part.inlineData.data}`;
+                            break;
+                          }
+                        }
+                        break; // success — exit retry loop
+                      } catch (err: any) {
+                        lastError = err;
+                        const isRetryable = err?.status === 503 || err?.status === 429 ||
+                          err?.message?.includes('503') || err?.message?.includes('unavailable');
+                        if (attempt < 3 && isRetryable) {
+                          console.log(`[GeminiLive] Image generation attempt ${attempt} failed (${err?.status}), retrying in ${1500 * attempt}ms...`);
+                          await new Promise(r => setTimeout(r, 1500 * attempt));
+                          continue;
+                        }
+                        throw err; // rethrow non-retryable or final attempt
                       }
                     }
 
