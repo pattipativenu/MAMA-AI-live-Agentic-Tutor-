@@ -362,12 +362,14 @@ export default function TutorChat() {
         if (isMuted) return 'IDLE';
         switch (status) {
             case 'listening': return 'LISTENING';
-            case 'thinking': return 'THINKING';
+            case 'thinking': return 'IDLE'; // Skip thinking animation, just show idle
             case 'explaining':
             case 'clarifying':
-            case 'asking': return 'SPEAKING';
+            case 'asking':
+            case 'whiteboard':
+            case 'referencing': return 'SPEAKING';
             case 'creating-visual':
-            case 'creating-video': return 'THINKING'; // Show thinking during generation
+            case 'creating-video': return 'IDLE';
             default: return 'IDLE';
         }
     }, [status, isMuted]);
@@ -1037,7 +1039,7 @@ ${answersContent}
                                                 audioStream={audioStream}
                                                 ttsAudio={null}
                                                 ttsAnalyser={ttsAnalyser}
-                                                size={220}
+                                                size={160}
                                             />
                                             {/* Mute indicator overlay */}
                                             {isMuted && (

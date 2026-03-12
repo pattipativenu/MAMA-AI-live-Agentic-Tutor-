@@ -200,12 +200,12 @@ const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
     const g = p.orangeRGB[1] + (p.greenRGB[1] - p.orangeRGB[1]) * colorMix;
     const b = p.orangeRGB[2] + (p.greenRGB[2] - p.orangeRGB[2]) * colorMix;
 
-    // 2. 3D Noise for surface ripple
+    // 2. 3D Noise for surface ripple (increased amplitude for visibility)
     const noiseFreq = 3.0;
     const noise = Math.sin(p.baseX * noiseFreq + time) *
                   Math.cos(p.baseY * noiseFreq + time) *
                   Math.sin(p.baseZ * noiseFreq + time);
-    const sphereRadius = radius + noise * (amplitude * 40);
+    const sphereRadius = radius + noise * (amplitude * 60);
 
     const sx = p.baseX * sphereRadius;
     const sy = p.baseY * sphereRadius;
@@ -297,17 +297,17 @@ const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
       targetAmp = 0.1 + Math.sin(v.current.time * 2) * 0.02;
       targetColorMix = 0; // Orange
     } else if (state === 'LISTENING') {
-      // Mic audio drives spike intensity
-      targetAmp = 0.2 + (micAudioLevel * 1.5);
+      // Mic audio drives spike intensity (amplified for visibility)
+      targetAmp = 0.2 + (micAudioLevel * 3.0);
       targetColorMix = 0; // Orange
     } else if (state === 'THINKING') {
-      // Atom morph + orange→green pulse
-      targetAmp = 0.15;
-      targetMorph = 1.0;
-      targetColorMix = 0.3 + Math.sin(v.current.time * 3) * 0.3; // Oscillates 0-0.6
+      // Simplified: just sphere with gentle pulse, no atom morph
+      targetAmp = 0.15 + Math.sin(v.current.time * 2) * 0.05;
+      targetMorph = 0; // Stay as sphere
+      targetColorMix = 0.5; // Halfway between orange and green
     } else if (state === 'SPEAKING') {
-      // TTS audio drives spike intensity
-      targetAmp = 0.15 + (ttsAudioLevel * 1.2);
+      // TTS audio drives spike intensity (amplified for visibility)
+      targetAmp = 0.15 + (ttsAudioLevel * 2.5);
       targetColorMix = 1.0; // Green
     } else if (state === 'ERROR') {
       targetAmp = 0.1;
@@ -323,12 +323,19 @@ const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
     v.current.mouseY += (v.current.targetMouseY - v.current.mouseY) * 0.12;
 
     v.current.time += 0.015 + v.current.amplitude * 0.03;
-    v.current.rotation += state === 'THINKING' ? 0.03 : 0.004;
+    v.current.rotation += 0.004; // Consistent slow rotation for all states
 
     // ── Draw particles ──────────────────────────────────────────────────────
+    // Update all particles first
     particlesRef.current.forEach(p => {
       updateParticle(p, width, height);
-
+    });
+    
+    // Sort by Z depth (back to front) for proper 3D occlusion
+    particlesRef.current.sort((a, b) => a.z - b.z);
+    
+    // Draw particles
+    particlesRef.current.forEach(p => {
       const margin = 50;
       if (
         p.alpha > 0.05 &&
@@ -367,7 +374,7 @@ const GlobeVisualizer: React.FC<GlobeVisualizerProps> = ({
   return (
     <div 
       ref={containerRef} 
-      className="relative w-full h-full flex items-center justify-center"
+      className="relative rounded-full overflow-hidden"
       style={{ width: size, height: size }}
     >
       <canvas 
