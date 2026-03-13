@@ -1,0 +1,5 @@
+.git
+.github
+node_modules
+dist
+# Do NOT ignore .env.local because Cloud Build needs it to bake the VITE_ variables into the React SPA.

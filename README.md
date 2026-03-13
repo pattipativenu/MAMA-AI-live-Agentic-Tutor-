@@ -15,8 +15,7 @@
 [![Cloud Run](https://img.shields.io/badge/Cloud_Run-Deployed-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/run)
 [![Cloud Storage](https://img.shields.io/badge/Cloud_Storage-Media_Cache-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/storage)
 
-**🌐 Live Demo**: [https://mama-ai-app.web.app](https://mama-ai-app.web.app)  
-**☁️ Cloud Run URL**: [https://mama-ai-service-972465918951.us-central1.run.app](https://mama-ai-service-972465918951.us-central1.run.app)  
+**☁️ Cloud Run URL**: [https://mama-ai-service-972465918951.us-central1.run.app](https://mama-ai-service-972465918951.us-central1.run.app) [<img src="./public/assets/Mama_logo.png" width="28" height="28" alt="Mama AI" style="vertical-align: middle; margin-left: 6px; border-radius: 4px;">](https://mama-ai-service-972465918951.us-central1.run.app)  
 </div>
 
 ## 🌟 Overview
@@ -43,104 +42,117 @@ Traditional ed-tech forces students to type questions into a search box. Mama AI
 | **Learning Modes** | Lab → Tutor → Exam → Notes |
 | **Storage** | Firestore (data) + Cloud Storage (media) |
 
-## 🗺️ System Architecture
+## 🗺️ System Architecture Diagram
 
-### High-Level Data Flow
+> **📋 Judge Note:** This section provides the **clear visual representation of the system** as required by the submission guidelines. It shows how **Gemini connects to the backend (Firebase), database (Firestore), and frontend (React)**.
+
+### Architecture Overview
 
 ```mermaid
+---
+config:
+  layout: elk
+  look: neo
+  theme: neo
+---
 flowchart TB
-    %% Styling
-    classDef user fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef frontend fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef gemini fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    classDef storage fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-    classDef process fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    
-    %% User Layer
-    User((👤 Student)):::user --> |"Opens App"| MobileUI["📱 Mobile UI<br/>(React + Vite)<br/>max-w-[430px]"]
-    
-    %% Frontend Layer
-    subgraph Frontend["Frontend - React Application"]
-        MobileUI --> |"Selects Mode"| ModeSelector{"Mode Selection"}
-        ModeSelector --> LabMode["🔬 Lab Mode"]
-        ModeSelector --> TutorMode["📚 Tutor Mode"]
-        ModeSelector --> ExamMode["📝 Exam Mode"]
-        ModeSelector --> NotesMode["📝 My Study Notes"]
-    end
-    
-    %% Live API Layer
-    subgraph LiveAPI["Gemini Live API - Real-time Voice & Vision"]
-        useGeminiLive["⚡ useGeminiLive Hook"]:::gemini
-        LiveModel["🤖 gemini-2.5-flash-native-audio-preview-12-2025<br/>(Live API Voice + Vision)"]
-        Inputs["🎤 Mic + 📷 Camera<br/>(Bidirectional Stream)"]
-        Outputs["🔊 Audio Out + 📝 Transcript"]
-    end
-    
-    LabMode --> useGeminiLive
-    ExamMode --> useGeminiLive
-    TutorMode --> useGeminiLive
-    useGeminiLive --> |"Streams"| LiveModel
-    Inputs --> useGeminiLive
-    useGeminiLive --> Outputs
-    
-    %% Tool Calling Layer
-    subgraph Tools["AI Tool Calls - Generative Media"]
-        Whiteboard["✍️ Whiteboard Tool<br/>(Interactive LaTeX Math)"]
-        ImgTool["🎨 generate_image Tool"]
-        VidTool["🎬 generate_video Tool"]
-    end
-    
-    LiveModel --> |"Triggers Tools"| Whiteboard
-    LiveModel --> |"Triggers Tools"| ImgTool
-    LiveModel --> |"Triggers Tools"| VidTool
-    
-    %% Generation Layer
-    subgraph Generation["Model Generation"]
-        ImgGen["🖼️ Nano Banana 2<br/>gemini-3.1-flash-image-preview<br/>(9:16 Portrait Images)"]
-        VidGen["🎥 Veo 3.1 Fast<br/>veo-3.1-fast-generate-preview<br/>(8s Silent Videos)"]
-    end
-    
+ subgraph Modes["🎓 Learning Modes"]
+        LabMode["🔬 Lab Mode"]
+        ExamMode["📝 Exam Mode"]
+        TutorMode["📚 Tutor & Study Mode"]
+  end
+ subgraph Live["🎧 Realtime Audio & Vision (Gemini Live API)"]
+        useGeminiLive["⚡ useGeminiLive Hook"]
+        LiveModelLabExam["🤖 Live API Voice Model<br/>gemini-2.5-flash-native-audio-preview-12-2025"]
+        Mic["🎤 Mic Audio (PCM16 16kHz)"]
+        Cam["📷 Vision Camera"]
+        LiveOut["🔊 Audio Out (PCM 24kHz)<br/>+ Session Transcripts"]
+  end
+ subgraph Tools["🎨 Live Tools & Generative Media"]
+        Whiteboard["✍️ Whiteboard Tool Calls<br/>(Interactive LaTeX Math)"]
+        ImgTool["🎨 generate_image"]
+        VidTool["🎬 generate_video"]
+        ImgGen["🖼️ Nano Banana 2<br/>Image Generation Model<br/>gemini-3.1-flash-image-preview"]
+        VidGen["🎥 Veo 3.1 Fast<br/>Video Generation Model<br/>veo-3.1-fast-generate-preview"]
+  end
+ subgraph Firebase["☁️ Firebase Backend"]
+        Auth["🔐 Auth"]
+        Firestore["🔥 Firestore<br/>(Sessions, Profiles, Video Jobs, Embeddings)"]
+        Storage["☁️ Cloud Storage<br/>(PDFs, Images, Videos, Diagrams)"]
+  end
+ subgraph Grounding["📚 Textbook-Grounded RAG & Reasoning"]
+        TutorText["📖 System Instruction Injector<br/>(Past Session Context)"]
+        Eval["🧠 useGeminiReasoning<br/>Reasoning Model<br/>gemini-3.1-pro-preview"]
+        TextbookParse["📄 PDF / EPUB JS Extractor<br/>Fast Parsing Model<br/>gemini-3.1-flash-lite-preview"]
+        DiagramExtract["🔍 Diagram Extractor & Semantics<br/>Embedding Model<br/>gemini-embedding-2-preview"]
+  end
+    User(("👩‍🎓 Student")) --> MobileUI["💻 MAMA-AI MobileFirst UI<br/>(React + Vite)"]
+    MobileUI --> LabMode & TutorMode
+    MobileUI -.-> ExamMode
+    ExamMode --> useGeminiLive & Eval
+    TutorMode --> useGeminiLive & TutorText & TextbookParse & DiagramExtract
+    Mic --> useGeminiLive
+    Cam --> useGeminiLive
+    useGeminiLive --> LiveModelLabExam & LiveOut & Whiteboard & ImgTool & VidTool & Auth & Firestore
     ImgTool --> ImgGen
     VidTool --> VidGen
-    
-    %% RAG Layer
-    subgraph RAG["Textbook Grounding & RAG"]
-        TextbookParse["📖 PDF Parser<br/>gemini-3.1-flash-lite-preview"]
-        DiagramExtract["🔍 Diagram Extractor<br/>gemini-3.1-pro-preview"]
-        Embeddings["📊 Embedding Generator<br/>gemini-embedding-2-preview"]
-        Reasoning["🧠 Reasoning Engine<br/>gemini-3.1-pro-preview"]
-    end
-    
-    TutorMode --> TextbookParse
-    TutorMode --> DiagramExtract
-    ExamMode --> Reasoning
-    DiagramExtract --> Embeddings
-    
-    %% Storage Layer
-    subgraph Firebase["Google Cloud - Firebase"]
-        Firestore[("🔥 Cloud Firestore<br/>Sessions, Profiles<br/>Video Jobs, Embeddings")]:::storage
-        Storage[("☁️ Cloud Storage<br/>PDFs, Images<br/>Videos, Diagrams")]:::storage
-        Auth[("🔐 Firebase Auth<br/>User Authentication")]
-    end
-    
-    %% Data Persistence Flow
-    useGeminiLive --> |"Saves Session"| Firestore
-    ImgGen --> |"Stores Media"| Storage
-    VidGen --> |"Stores Media"| Storage
-    VidGen --> |"Job Status"| Firestore
-    TextbookParse --> |"TOC & Text"| Firestore
-    DiagramExtract --> |"Raw Images"| Storage
-    Embeddings --> |"Vectors"| Firestore
-    
-    %% Study Notes Flow
-    NotesMode --> |"Generates Summary"| StudyNotes["📝 Study Notes Generator<br/>gemini-3.1-pro-preview"]
-    StudyNotes --> |"Saves"| Firestore
-    
-    %% Styling links
-    linkStyle 0 stroke:#01579b,stroke-width:3px
-    linkStyle 1 stroke:#e65100,stroke-width:2px
-    linkStyle 2 stroke:#2e7d32,stroke-width:2px
-    linkStyle 3 stroke:#c2185b,stroke-width:2px
+    ImgGen --> Storage
+    VidGen --> Storage & Firestore
+    TextbookParse --> Firestore
+    DiagramExtract --> Storage & Firestore
+    LabMode --> useGeminiLive
+
+     User:::user
+     MobileUI:::ui
+    classDef group2 fill:#fff8e1,stroke:#fbc02d,stroke-width:2px,color:#e65100,font-weight:bold
+    classDef group3 fill:#ede7f6,stroke:#7e57c2,stroke-width:2px,color:#311b92,font-weight:bold
+    classDef group4 fill:#e0f7fa,stroke:#00acc1,stroke-width:2px,color:#004d40,font-weight:bold
+    classDef group5 fill:#fff3e0,stroke:#fb8c00,stroke-width:2px,color:#e65100,font-weight:bold
+    classDef user fill:#fce4ec,stroke:#ec407a,color:#000,font-weight:bold
+    classDef ui fill:#e3f2fd,stroke:#42a5f5,color:#000,font-weight:bold
+    style Grounding stroke:#000000,fill:#FFE0B2
+    style Live fill:#FFE0B2,stroke:#000000,color:#000000
+    style Modes fill:#C8E6C9
+    style Tools fill:#C8E6C9
+    style Firebase fill:#FFE0B2
+    click useGeminiLive "https://ai.google.dev/gemini-api/docs/live-api"
+    click LiveOut "https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-native-audio-preview-12-2025"
+    click ImgGen "https://ai.google.dev/gemini-api/docs/image-generation"
+    click VidGen "https://ai.google.dev/gemini-api/docs/video"
+    click Auth "https://firebase.google.com/docs/auth"
+    click Firestore "https://firebase.google.com/docs/firestore"
+    click Storage "https://firebase.google.com/docs/storage"
+    click Eval "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview"
+    click DiagramExtract "https://ai.google.dev/gemini-api/docs/embeddings"
+    click MobileUI "https://mama-ai-service-972465918951.us-central1.run.app/"
+    linkStyle 0 stroke:#757575,fill:none
+    linkStyle 1 stroke:#757575,fill:none
+    linkStyle 2 stroke:#757575,fill:none
+    linkStyle 3 stroke:#757575,fill:none
+    linkStyle 4 stroke:#757575,fill:none
+    linkStyle 5 stroke:#757575,fill:none
+    linkStyle 6 stroke:#757575,fill:none
+    linkStyle 7 stroke:#757575,fill:none
+    linkStyle 8 stroke:#757575,fill:none
+    linkStyle 9 stroke:#757575,fill:none
+    linkStyle 10 stroke:#757575,fill:none
+    linkStyle 11 stroke:#757575,fill:none
+    linkStyle 12 stroke:#757575,fill:none
+    linkStyle 13 stroke:#757575,fill:none
+    linkStyle 14 stroke:#757575,fill:none
+    linkStyle 15 stroke:#757575,fill:none
+    linkStyle 16 stroke:#757575,fill:none
+    linkStyle 17 stroke:#757575,fill:none
+    linkStyle 18 stroke:#757575,fill:none
+    linkStyle 19 stroke:#757575,fill:none
+    linkStyle 20 stroke:#757575,fill:none
+    linkStyle 21 stroke:#757575,fill:none
+    linkStyle 22 stroke:#757575,fill:none
+    linkStyle 23 stroke:#757575,fill:none
+    linkStyle 24 stroke:#757575,fill:none
+    linkStyle 25 stroke:#757575,fill:none
+    linkStyle 26 stroke:#757575,fill:none
+    linkStyle 27 stroke:#757575,fill:none
 ```
 
 ### Component Breakdown
