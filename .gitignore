@@ -7,7 +7,12 @@ coverage/
 .env*
 !.env.example
 
-# Agent/IDE folders
-.agents/
+# IDE folders
 .claude/
-.cursor/
+.antigravity/
+
+# Agent skills
+.agents/
+
+# Documentation drafts
+docs/superpowers/
