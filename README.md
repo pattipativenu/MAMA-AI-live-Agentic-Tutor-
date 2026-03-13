@@ -16,7 +16,7 @@
 [![Cloud Storage](https://img.shields.io/badge/Cloud_Storage-Media_Cache-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/storage)
 
 **🌐 Live Demo**: [https://mama-ai-app.web.app](https://mama-ai-app.web.app)  
-**☁️ Cloud Run URL**: [https://mama-ai-service-xxxxxxxxxx-uc.a.run.app](https://mama-ai-service-xxxxxxxxxx-uc.a.run.app)  
+**☁️ Cloud Run URL**: [https://mama-ai-service-972465918951.us-central1.run.app](https://mama-ai-service-972465918951.us-central1.run.app)  
 </div>
 
 ## 🌟 Overview
