@@ -84,8 +84,9 @@ export function useGeminiLive(
   const sessionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | AudioWorkletNode | null>(null);
   const videoIntervalRef = useRef<number | null>(null);
+  const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
 
   // Audio playback state
   const playbackContextRef = useRef<AudioContext | null>(null);
@@ -97,6 +98,10 @@ export function useGeminiLive(
   const isCleaningUpRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 3;
+
+  // WebSocket state tracking for function call safety
+  const webSocketStateRef = useRef<'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED'>('CLOSED');
+  const pendingFunctionCallsRef = useRef<Array<{call: any, resolve: (response: any) => void}>>([]);
 
   // Store connection params for reconnection
   const connectionParamsRef = useRef<{
@@ -228,6 +233,12 @@ export function useGeminiLive(
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
+    }
+
+    // Clean up AudioWorkletNode specifically
+    if (audioWorkletNodeRef.current) {
+      audioWorkletNodeRef.current.port.close();
+      audioWorkletNodeRef.current = null;
     }
 
     if (videoIntervalRef.current) {
@@ -364,11 +375,21 @@ export function useGeminiLive(
           channelCount: 1,
           sampleRate: 16000,
           echoCancellation: true,
-          noiseSuppression: true
+          // noiseSuppression and autoGainControl are intentionally DISABLED:
+          // These browser-level filters aggressively compress quiet/normal speech
+          // on phone mics to near-silence, requiring users to shout. Gemini's
+          // own VAD handles noise robustly so we don't need these here.
+          noiseSuppression: false,
+          autoGainControl: false,
         }
       });
       mediaStreamRef.current = stream;
+
+      // Log microphone details
+      const audioTrack = stream.getAudioTracks()[0];
       console.log("[GeminiLive] Mic access granted.");
+      console.log("[GeminiLive] Microphone:", audioTrack.label);
+      console.log("[GeminiLive] Mic settings:", audioTrack.getSettings());
 
       if (audioContext.state === 'suspended') await audioContext.resume();
       if (playbackContext.state === 'suspended') await playbackContext.resume();
@@ -508,7 +529,7 @@ export function useGeminiLive(
 
       const generateVideoDeclaration: FunctionDeclaration = {
         name: "generate_video",
-        description: "Generates an 8-second silent educational animation video to demonstrate a complex concept or physical process. Use this when explaining dynamic phenomena (osmosis, forces, chemical reactions, planetary motion, etc.) that would benefit from visual animation. This creates a video that will appear in the media gallery while you continue explaining. VIDEO DEFAULT RULE: Generate at most ONE video per topic by default. Only call generate_video a second time for the same topic if the student explicitly asks for another animation (e.g. 'show me another video', 'animate that differently'). Never auto-generate more than one video per concept without a student request.",
+        description: "Generates an 8-second COMPLETELY SILENT educational animation video to demonstrate a complex concept or physical process. Use this when explaining dynamic phenomena (osmosis, forces, chemical reactions, planetary motion, etc.) that would benefit from visual animation. The video generates in the background (takes 30-60 seconds) while you CONTINUE EXPLAINING - do not pause or wait. VIDEO DEFAULT RULE: Generate at most ONE video per topic by default. Only call generate_video a second time for the same topic if the student explicitly asks for another animation (e.g. 'show me another video', 'animate that differently'). Never auto-generate more than one video per concept without a student request.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -524,6 +545,11 @@ export function useGeminiLive(
               type: Type.STRING,
               enum: ["realistic", "space", "anime", "historical", "action"],
               description: "Visual theme for the animation. 'realistic' for photorealistic scientific accuracy, 'space' for cosmic/physics themes, 'anime' for stylized youth-friendly, 'historical' for vintage documentary feel, 'action' for high-energy comic style."
+            },
+            visualStyle: {
+              type: Type.STRING,
+              enum: ["diagram-only", "real-world-only", "transformation"],
+              description: "Visual presentation style. 'diagram-only' shows pure textbook diagrams (DEFAULT - use for most concepts), 'real-world-only' shows photorealistic examples, 'transformation' morphs real-world into diagram. Pick based on what best illustrates the concept."
             }
           },
           required: ["concept"]
@@ -578,7 +604,12 @@ export function useGeminiLive(
       //   native-audio model for Google AI Studio (v1beta endpoint).
       //   Native audio models ONLY support Modality.AUDIO — adding
       //   Modality.TEXT causes an immediate 1008 WebSocket disconnect.
-      const liveModel = 'gemini-2.5-flash-native-audio-preview-12-2025';
+      // Model selection by mode:
+      // - Tutor: 'latest' (most stable for large chapter content)
+      // - Lab/Exam: 'preview-12-2025' (specific features needed)
+      const liveModel = mode === 'tutor'
+        ? 'gemini-2.5-flash-native-audio-latest'
+        : 'gemini-2.5-flash-native-audio-preview-12-2025';
       const sessionPromise = ai.live.connect({
         model: liveModel,
         config: {
@@ -600,10 +631,11 @@ export function useGeminiLive(
           contextWindowCompression: { slidingWindow: {} },
         },
         callbacks: {
-          onopen: () => {
+          onopen: async () => {
             console.log("[GeminiLive] WebSocket connection OPEN");
             // Reset reconnection attempts on successful connection
             reconnectAttemptsRef.current = 0;
+            webSocketStateRef.current = 'OPEN';
             setIsConnected(true);
             setIsConnecting(false);
             isConnectingRef.current = false;
@@ -654,17 +686,104 @@ export function useGeminiLive(
 
             const source = audioContext.createMediaStreamSource(stream);
             const gainNode = audioContext.createGain();
-            gainNode.gain.value = 2.0;
-
-            const processor = audioContext.createScriptProcessor(4096, 1, 1);
-            processorRef.current = processor;
+            // Gain at 1.5 — a balance between 1.0 (too quiet for phone mics)
+            // and 2.0 (caused clipping). noiseSuppression/autoGainControl are
+            // disabled in getUserMedia above, so this boost is safe from clipping.
+            gainNode.gain.value = 1.5;
 
             let packetCount = 0;
             // Reset silence tracking for new session
             silentFrameCountRef.current = 0;
             audioStreamEndSentRef.current = false;
 
-            processor.onaudioprocess = (e) => {
+            // Try to use modern AudioWorkletNode, fallback to ScriptProcessorNode
+            let useAudioWorklet = false;
+
+            // TEMPORARY: Disable AudioWorklet to debug - fallback to ScriptProcessor
+            const ENABLE_AUDIO_WORKLET = false;
+
+            try {
+              // Check if AudioWorklet is supported
+              if (ENABLE_AUDIO_WORKLET && audioContext.audioWorklet) {
+                useAudioWorklet = true;
+                console.log('[GeminiLive] Using AudioWorkletNode (modern API)');
+
+                // Load the audio processor worklet
+                await audioContext.audioWorklet.addModule('/audio-processor.js');
+
+                const workletNode = new AudioWorkletNode(audioContext, 'gemini-audio-processor');
+                audioWorkletNodeRef.current = workletNode;
+                processorRef.current = workletNode;
+
+                // Handle audio data from worklet
+                workletNode.port.onmessage = (event) => {
+                  if (event.data.type === 'audioData') {
+                    const { data: base64Data, rms, packetCount: count } = event.data;
+                    packetCount = count;
+
+                    // Log every 50 packets
+                    if (packetCount % 50 === 0) {
+                      console.log(`[GeminiLive] Sent ${packetCount} audio packets... Mic RMS: ${rms.toFixed(4)}`);
+                      if (rms < 0.001) {
+                        console.warn("[GeminiLive] Warning: Microphone audio is completely silent.");
+                        setIsSilent(true);
+                      } else {
+                        setIsSilent(false);
+                      }
+                    }
+
+                    // Silence detection
+                    if (rms < SILENCE_THRESHOLD) {
+                      silentFrameCountRef.current++;
+                      if (silentFrameCountRef.current >= SILENCE_FRAMES_BEFORE_END && !audioStreamEndSentRef.current) {
+                        audioStreamEndSentRef.current = true;
+                        sessionPromise.then((session) => {
+                          if (session && sessionRef.current === session && !isCleaningUpRef.current) {
+                            try {
+                              session.sendRealtimeInput({ audioStreamEnd: true });
+                            } catch (_) { /* ignore */ }
+                          }
+                        });
+                      }
+                    } else {
+                      silentFrameCountRef.current = 0;
+                      audioStreamEndSentRef.current = false;
+                    }
+
+                    // Send audio to Gemini
+                    sessionPromise.then((session) => {
+                      if (session && sessionRef.current === session && !isCleaningUpRef.current) {
+                        try {
+                          session.sendRealtimeInput({
+                            media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+                          });
+                        } catch (err: any) {
+                          if (!isCleaningUpRef.current) {
+                            console.warn('[GeminiLive] Audio send error:', err.message);
+                          }
+                        }
+                      }
+                    });
+                  }
+                };
+
+                // Connect audio graph
+                source.connect(gainNode);
+                gainNode.connect(workletNode);
+                workletNode.connect(audioContext.destination);
+              }
+            } catch (workletError) {
+              console.warn('[GeminiLive] AudioWorklet not supported, falling back to ScriptProcessorNode:', workletError);
+              useAudioWorklet = false;
+            }
+
+            // Fallback to deprecated ScriptProcessorNode if AudioWorklet fails
+            if (!useAudioWorklet) {
+              console.log('[GeminiLive] Using ScriptProcessorNode (deprecated fallback)');
+              const processor = audioContext.createScriptProcessor(4096, 1, 1);
+              processorRef.current = processor;
+
+              processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               if (isMutedRef.current) return;
 
@@ -686,45 +805,33 @@ export function useGeminiLive(
                 }
               }
 
-              // Silence detection: send audioStreamEnd after ~1s of silence
-              // per Gemini docs to flush cached audio
-              if (rms < SILENCE_THRESHOLD) {
-                silentFrameCountRef.current++;
-                if (silentFrameCountRef.current >= SILENCE_FRAMES_BEFORE_END && !audioStreamEndSentRef.current) {
-                  audioStreamEndSentRef.current = true;
-                  sessionPromise.then((session) => {
-                    if (session && sessionRef.current === session && !isCleaningUpRef.current) {
-                      try {
-                        session.sendRealtimeInput({ audioStreamEnd: true });
-                      } catch (_) { /* ignore */ }
-                    }
-                  });
-                }
-              } else {
-                silentFrameCountRef.current = 0;
-                audioStreamEndSentRef.current = false;
-              }
+              // NOTE: audioStreamEnd is intentionally NOT sent in continuous
+              // tutoring mode. It is designed for discrete utterance scenarios
+              // and causes Gemini to prematurely flush its context mid-sentence
+              // in always-on microphone sessions, causing jitter and cutoffs.
 
-              sessionPromise.then((session) => {
-                // Guard: Only send if session exists and not cleaning up
-                if (session && sessionRef.current === session && !isCleaningUpRef.current) {
-                  try {
-                    session.sendRealtimeInput({
-                      media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
-                    });
-                  } catch (err: any) {
-                    if (!isCleaningUpRef.current) {
-                      console.warn('[GeminiLive] Audio send error:', err.message);
+                sessionPromise.then((session) => {
+                  // Guard: Only send if session exists and not cleaning up
+                  if (session && sessionRef.current === session && !isCleaningUpRef.current) {
+                    try {
+                      session.sendRealtimeInput({
+                        media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+                      });
+                    } catch (err: any) {
+                      if (!isCleaningUpRef.current) {
+                        console.warn('[GeminiLive] Audio send error:', err.message);
+                      }
                     }
                   }
-                }
-              });
-            };
+                });
+              };
 
-            source.connect(gainNode);
-            gainNode.connect(processor);
-            processor.connect(audioContext.destination);
+              source.connect(gainNode);
+              gainNode.connect(processor);
+              processor.connect(audioContext.destination);
+            }
 
+            // Handle video capture (works for both AudioWorklet and ScriptProcessor)
             if (videoElement) {
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
@@ -772,9 +879,21 @@ export function useGeminiLive(
 
             // Handle Tool Calls (Whiteboard, Image, Video Generation)
             if (message.toolCall && message.toolCall.functionCalls) {
+              console.log('[GeminiLive] Function calls received:', message.toolCall.functionCalls.map(c => c.name));
+
+              // Check WebSocket state before processing
+              if (isCleaningUpRef.current || !sessionRef.current) {
+                console.warn('[GeminiLive] Skipping function calls - session closing or closed');
+                return;
+              }
+
+              webSocketStateRef.current = 'OPEN'; // Mark as actively processing
               setStatus('creating-visual');
               const calls = message.toolCall.functionCalls;
+
+              // Process function calls with error boundaries
               const responses = await Promise.all(calls.map(async (call) => {
+                try {
                 if (call.name === 'add_whiteboard_step') {
                   const args = call.args as any;
                   console.log('[GeminiLive] add_whiteboard_step called:', args.math);
@@ -818,7 +937,7 @@ export function useGeminiLive(
                     };
                   });
                   setStatus('whiteboard');
-                  return { id: call.id, name: call.name, response: { result: 'Step added to whiteboard. The student is reading it. Continue explaining or ask a question.' } };
+                  return { id: call.id, name: call.name, response: { result: 'Step added. NOW IMMEDIATELY call add_whiteboard_step again for the NEXT step of this explanation WITHOUT PAUSING. Keep building the derivation — write out ALL the key equations, definitions, fringe conditions, and formulas one step at a time. Do NOT stop after one step. Only pause to check understanding AFTER you have written at least 3–5 meaningful whiteboard steps that fully cover the concept with actual equations and values.' } };
                 }
 
                 if (call.name === 'highlight_whiteboard_step') {
@@ -837,119 +956,124 @@ export function useGeminiLive(
 
                 if (call.name === 'generate_image') {
                   const prompt = (call.args as any).prompt;
-                  console.log("[GeminiLive] Generating image for prompt:", prompt);
+                  console.log("[GeminiLive] Starting async image generation for prompt:", prompt);
                   setIsGeneratingImage(true);
-                  try {
-                    const imageAi = new GoogleGenAI({ apiKey: getApiKey() });
+                  
+                  // Fire-and-forget async image generation
+                  (async () => {
+                    try {
+                      const imageAi = new GoogleGenAI({ apiKey: getApiKey() });
 
-                    let base64Image: string | null = null;
-                    let mimeType = 'image/png';
+                      let base64Image: string | null = null;
+                      let mimeType = 'image/png';
 
-                    for (let attempt = 1; attempt <= 3; attempt++) {
-                      try {
-                        const imageResponse = await imageAi.models.generateContent({
-                          model: 'gemini-3.1-flash-image-preview',
-                          contents: { parts: [{ text: prompt }] },
-                          config: {
-                            responseModalities: ['TEXT', 'IMAGE'],
+                      for (let attempt = 1; attempt <= 3; attempt++) {
+                        try {
+                          const imageResponse = await imageAi.models.generateContent({
+                            model: 'gemini-3.1-flash-image-preview',
+                            contents: { parts: [{ text: prompt }] },
+                            config: {
+                              responseModalities: ['TEXT', 'IMAGE'],
+                            }
+                          });
+
+                          for (const part of imageResponse.candidates?.[0]?.content?.parts || []) {
+                            if (part.inlineData) {
+                              mimeType = part.inlineData.mimeType || 'image/png';
+                              base64Image = `data:${mimeType};base64,${part.inlineData.data}`;
+                              break;
+                            }
                           }
+                          break; // success — exit retry loop
+                        } catch (err: any) {
+                          const isRetryable = err?.status === 503 || err?.status === 429 ||
+                            err?.message?.includes('503') || err?.message?.includes('unavailable');
+                          if (attempt < 3 && isRetryable) {
+                            console.log(`[GeminiLive] Image generation attempt ${attempt} failed (${err?.status}), retrying in ${1500 * attempt}ms...`);
+                            await new Promise(r => setTimeout(r, 1500 * attempt));
+                            continue;
+                          }
+                          throw err; // rethrow non-retryable or final attempt
+                        }
+                      }
+
+                      if (base64Image) {
+                        // For Tutor mode: Don't show immediately - keep in gallery for sequential explanation
+                        // For Exam/Lab mode: Show immediately
+                        if (mode !== 'tutor') {
+                          setCurrentImage(base64Image);
+                        }
+
+                        // Upload to Firebase Storage to avoid Firestore 1MB limit
+                        let storageUrl = base64Image; // fallback to data URI
+                        try {
+                          const userId = getAuth().currentUser?.uid;
+                          if (userId) {
+                            const storagePath = `users/${userId}/generated/images/${Date.now()}.${mimeType.split('/')[1] || 'png'}`;
+                            const storageRef = ref(storage, storagePath);
+                            const rawBase64 = base64Image.split(',')[1];
+                            await uploadString(storageRef, rawBase64, 'base64', { contentType: mimeType });
+                            storageUrl = await getDownloadURL(storageRef);
+                            console.log('[GeminiLive] Image uploaded to Storage:', storageUrl);
+                          }
+                        } catch (uploadErr) {
+                          console.warn('[GeminiLive] Image upload to Storage failed, using data URI:', uploadErr);
+                        }
+
+                        setGeneratedMedia(prev => {
+                          const mediaItem: GeneratedMedia = {
+                            type: 'image',
+                            url: storageUrl, // Use Storage URL for persistence
+                            prompt,
+                            timestamp: Date.now(),
+                            caption: 'Generated visual aid'
+                          };
+                          return [...prev, mediaItem];
                         });
+                        setCurrentMediaIndex(prev => prev + 1);
 
-                        for (const part of imageResponse.candidates?.[0]?.content?.parts || []) {
-                          if (part.inlineData) {
-                            mimeType = part.inlineData.mimeType || 'image/png';
-                            base64Image = `data:${mimeType};base64,${part.inlineData.data}`;
-                            break;
+                        updateMessages(prev => {
+                          const last = prev[prev.length - 1];
+                          if (last && last.role === 'ai') {
+                            return [...prev.slice(0, -1), { ...last, image: storageUrl }];
                           }
-                        }
-                        break; // success — exit retry loop
-                      } catch (err: any) {
-                        const isRetryable = err?.status === 503 || err?.status === 429 ||
-                          err?.message?.includes('503') || err?.message?.includes('unavailable');
-                        if (attempt < 3 && isRetryable) {
-                          console.log(`[GeminiLive] Image generation attempt ${attempt} failed (${err?.status}), retrying in ${1500 * attempt}ms...`);
-                          await new Promise(r => setTimeout(r, 1500 * attempt));
-                          continue;
-                        }
-                        throw err; // rethrow non-retryable or final attempt
+                          return [...prev, { role: 'ai', text: '', image: storageUrl }];
+                        });
                       }
+                    } catch (e: any) {
+                      console.error("[GeminiLive] Image generation error:", e);
+                      // Add user-facing error feedback asynchronously
+                      updateMessages(prev => [...prev, {
+                        role: 'ai' as const,
+                        text: `I tried to generate an image but encountered an error: ${e.message}`,
+                        timestamp: Date.now()
+                      }]);
+                    } finally {
+                      setIsGeneratingImage(false);
                     }
+                  })();
 
-                    if (base64Image) {
-                      // Show immediately in UI (data URI for instant display)
-                      setCurrentImage(base64Image);
-
-                      // Upload to Firebase Storage to avoid Firestore 1MB limit
-                      let storageUrl = base64Image; // fallback to data URI
-                      try {
-                        const userId = getAuth().currentUser?.uid;
-                        if (userId) {
-                          const storagePath = `users/${userId}/generated/images/${Date.now()}.${mimeType.split('/')[1] || 'png'}`;
-                          const storageRef = ref(storage, storagePath);
-                          const rawBase64 = base64Image.split(',')[1];
-                          await uploadString(storageRef, rawBase64, 'base64', { contentType: mimeType });
-                          storageUrl = await getDownloadURL(storageRef);
-                          console.log('[GeminiLive] Image uploaded to Storage:', storageUrl);
-                        }
-                      } catch (uploadErr) {
-                        console.warn('[GeminiLive] Image upload to Storage failed, using data URI:', uploadErr);
-                      }
-
-                      let newIndex = 0;
-                      setGeneratedMedia(prev => {
-                        newIndex = prev.length;
-                        const mediaItem: GeneratedMedia = {
-                          type: 'image',
-                          url: storageUrl, // Use Storage URL for persistence
-                          prompt,
-                          timestamp: Date.now(),
-                          caption: 'Generated visual aid'
-                        };
-                        return [...prev, mediaItem];
-                      });
-                      setCurrentMediaIndex(prev => prev + 1);
-
-                      updateMessages(prev => {
-                        const last = prev[prev.length - 1];
-                        if (last && last.role === 'ai') {
-                          return [...prev.slice(0, -1), { ...last, image: storageUrl }];
-                        }
-                        return [...prev, { role: 'ai', text: '', image: storageUrl }];
-                      });
-                      return { id: call.id, name: call.name, response: { success: true, message: `Image generated and added to media gallery at index ${newIndex}. You can show it mid-whiteboard with show_media(${newIndex}).` } };
-                    } else {
-                      return { id: call.id, name: call.name, response: { success: false, message: "Failed to generate image." } };
-                    }
-                  } catch (e: any) {
-                    console.error("[GeminiLive] Image generation error:", e);
-                    // Add user-facing error feedback
-                    updateMessages(prev => [...prev, {
-                      role: 'ai' as const,
-                      text: `I tried to generate an image but encountered an error: ${e.message}`,
-                      timestamp: Date.now()
-                    }]);
-                    return { id: call.id, name: call.name, response: { success: false, message: e.message } };
-                  } finally {
-                    setIsGeneratingImage(false);
-                  }
+                  // Return IMMEDIATELY to Gemini so it keeps talking while the image generates in the background
+                  return { id: call.id, name: call.name, response: { success: true, message: `Started generating the image. It will appear on screen momentarily. KEEP EXPLAINING the concept continuously without pausing.` } };
                 }
 
                 if (call.name === 'generate_video') {
-                  const { concept, topicName, theme } = call.args as any;
+                  const { concept, topicName, theme, visualStyle } = call.args as any;
                   console.log("[GeminiLive] Starting video generation for concept:", concept);
-                  setStatus('creating-video');
-                  
+                  // Don't change status to 'creating-video' - keep AI speaking
+                  // setStatus('creating-video');  // ← Removed to prevent muting
+
                   try {
                     const auth = getAuth();
                     const userId = auth.currentUser?.uid;
-                    
+
                     if (!userId) {
                       return { id: call.id, name: call.name, response: { success: false, message: "User not authenticated" } };
                     }
 
                     // Generate a session ID for this voice session
                     const sessionId = `voice_${Date.now()}`;
-                    
+
                     // Start async job (fire-and-forget pattern)
                     const jobId = await startVideoGenerationJob(
                       concept,
@@ -959,7 +1083,8 @@ export function useGeminiLive(
                       {
                         topicName: topicName || concept,
                         theme: theme || 'realistic',
-                        aspectRatio: '9:16'
+                        aspectRatio: '9:16',
+                        visualStyle: visualStyle || 'diagram-only'  // NEW: Default to diagram-only
                       }
                     );
 
@@ -980,8 +1105,11 @@ export function useGeminiLive(
                         setGeneratedMedia(prev => [...prev, mediaItem]);
                         setCurrentMediaIndex(prev => prev + 1);
                         
-                        // Auto-select the new video
-                        setCurrentImage(null); // Clear any current image
+                        // For Tutor mode: Don't auto-select - let user or sequential flow handle it
+                        // For Exam/Lab mode: Auto-select the new video
+                        if (mode !== 'tutor') {
+                          setCurrentImage(null); // Clear any current image
+                        }
                         
                         // Add video to messages for session history
                         updateMessages(prev => {
@@ -1000,12 +1128,12 @@ export function useGeminiLive(
                     // Track subscription for cleanup
                     videoJobUnsubscribersRef.current.push(unsubscribe);
 
-                    return { 
-                      id: call.id, 
-                      name: call.name, 
-                      response: { 
-                        success: true, 
-                        message: `Started generating video for "${concept}". The animation will appear in the gallery shortly (usually 30-60 seconds). Continue your explanation while the video generates.`
+                    return {
+                      id: call.id,
+                      name: call.name,
+                      response: {
+                        success: true,
+                        message: `Video generation started for "${concept}" (takes 30-60 seconds, will appear automatically). CONTINUE EXPLAINING NOW without pausing - keep narrating while it generates in the background.`
                       } 
                     };
                   } catch (e: any) {
@@ -1045,11 +1173,35 @@ export function useGeminiLive(
                 }
 
                 return { id: call.id, name: call.name, response: { success: false, message: "Unknown function" } };
+                } catch (error: any) {
+                  console.error(`[GeminiLive] Function call '${call.name}' failed:`, error);
+                  return {
+                    id: call.id,
+                    name: call.name,
+                    response: {
+                      success: false,
+                      message: `Function execution error: ${error.message || 'Unknown error'}`
+                    }
+                  };
+                }
               }));
 
-              sessionPromise.then(session => {
-                session.sendToolResponse({ functionResponses: responses });
-              });
+              // Send function responses with error handling
+              try {
+                const session = await sessionPromise;
+                if (session && sessionRef.current === session && !isCleaningUpRef.current) {
+                  console.log('[GeminiLive] Sending function responses:', responses.map(r => `${r.name}: ${r.response.success !== false ? 'success' : 'failed'}`));
+                  session.sendToolResponse({ functionResponses: responses });
+                } else {
+                  console.warn('[GeminiLive] Skipping function response - session closed');
+                }
+              } catch (error: any) {
+                console.error('[GeminiLive] Failed to send function responses:', error);
+                // Don't crash - just log the error and continue
+                if (!isCleaningUpRef.current) {
+                  console.warn('[GeminiLive] Function response send failed, but session may continue');
+                }
+              }
             }
 
             // Extract AI text from standard parts
@@ -1260,7 +1412,8 @@ export function useGeminiLive(
           },
           onclose: (event?: CloseEvent) => {
             console.log("[GeminiLive] WebSocket connection CLOSED", event?.code, event?.reason);
-            
+            webSocketStateRef.current = 'CLOSED';
+
             // Circuit breaker: Don't reconnect if:
             // 1. This was an intentional disconnect
             // 2. We're already trying to connect (prevents race conditions)
@@ -1320,7 +1473,31 @@ export function useGeminiLive(
           },
           onerror: (error) => {
             console.error("[GeminiLive] WebSocket Error:", error);
-            disconnect("Connection error. Please try again.");
+            // Attempt reconnect on transient errors (same logic as onclose)
+            // rather than hard-disconnecting — mobile networks frequently
+            // produce brief WebSocket errors that aren't fatal.
+            const shouldReconnect = !isIntentionalDisconnectRef.current &&
+                                    !isConnectingRef.current &&
+                                    reconnectAttemptsRef.current < maxReconnectAttempts &&
+                                    connectionParamsRef.current;
+
+            if (shouldReconnect) {
+              reconnectAttemptsRef.current++;
+              console.warn(`[GeminiLive] WebSocket error — attempting reconnect (${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`);
+              setStatus('thinking');
+              const contextMessages = [...messagesRef.current];
+              const { systemInstruction, initialImage, videoElement } = connectionParamsRef.current!;
+              sessionRef.current = null;
+              const backoffDelay = 2000 * reconnectAttemptsRef.current;
+              setTimeout(() => {
+                if (!sessionRef.current && !isConnectingRef.current) {
+                  connect(systemInstruction, contextMessages, initialImage, videoElement)
+                    .catch(err => console.error('[GeminiLive] Reconnect after error failed:', err));
+                }
+              }, backoffDelay);
+            } else {
+              disconnect("Connection error. Please try again.");
+            }
           }
         }
       });
@@ -1340,6 +1517,12 @@ export function useGeminiLive(
     setIsMuted(newMuted);
     setStatus(newMuted ? 'muted' : 'listening');
 
+    // If using AudioWorklet, send mute command to worklet
+    if (audioWorkletNodeRef.current) {
+      audioWorkletNodeRef.current.port.postMessage({ type: 'setMuted', value: newMuted });
+    }
+
+    // Also disable/enable the media stream tracks for extra safety
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getAudioTracks().forEach(track => {
         track.enabled = !newMuted;

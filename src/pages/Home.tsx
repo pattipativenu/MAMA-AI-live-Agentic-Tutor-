@@ -269,16 +269,16 @@ export default function Home() {
         )}
       </section>
 
-      {/* Recent Sessions */}
+      {/* Recent Notes */}
       <section className="mt-4">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-bold text-zinc-900 tracking-tight">Recent Sessions</h2>
+          <h2 className="text-lg font-bold text-zinc-900 tracking-tight">Recent Notes</h2>
           {sessions.length > 0 && (
             <button 
               onClick={() => navigate('/sessions')}
               className="text-sm font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1"
             >
-              View All <ChevronRight size={16} />
+              My Notes <ChevronRight size={16} />
             </button>
           )}
         </div>
@@ -288,8 +288,8 @@ export default function Home() {
             <div className="w-20 h-20 bg-zinc-50 rounded-full flex items-center justify-center mb-5">
               <Clock size={32} className="text-zinc-300" />
             </div>
-            <p className="text-zinc-900 font-bold text-lg">No recent sessions</p>
-            <p className="text-sm text-zinc-500 mt-2 font-medium max-w-[200px]">Start a Lab or Exam to see your history here.</p>
+            <p className="text-zinc-900 font-bold text-lg">No recent notes</p>
+            <p className="text-sm text-zinc-500 mt-2 font-medium max-w-[200px]">Start learning with Mama AI to see your study notes here.</p>
           </div>
         ) : (
           <div className="flex gap-4 overflow-x-auto pb-6 snap-x snap-mandatory scrollbar-hide -mx-6 px-6">

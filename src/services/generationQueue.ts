@@ -16,7 +16,7 @@ export interface GenerationJob {
 
 /**
  * Initiates the background generation of media assets for a session.
- * For a hackathon, we trigger this from the client but manage State in Firestore
+ * We trigger this from the client but manage State in Firestore
  * so the polling UI can listen to updates.
  */
 export async function startGenerationQueue(

@@ -23,6 +23,7 @@ import {
   countMedia,
   hasWhiteboardUsage,
 } from '../services/sessionHeading';
+import { generateEmbedding } from '../utils/diagramExtractor';
 
 export interface SessionMessage {
   role: 'user' | 'ai' | 'system';
@@ -70,6 +71,9 @@ export interface SavedSession {
   evaluation?: SessionEvaluation;
   generationJob?: GenerationJob;
   generatedMedia?: GeneratedMedia[]; // NEW: Store generated images/videos
+  embedding?: number[]; // Semantic embedding vectors
+  bookId?: string;
+  chapterIndex?: number;
 }
 
 // Re-export GeneratedMedia for convenience
@@ -181,6 +185,7 @@ export function useSessions() {
     sessionId?: string,
     evaluation?: SessionEvaluation,
     generatedMedia?: GeneratedMedia[],
+    context?: { bookId?: string, chapterIndex?: number },
     force = false
   ): Promise<string | null> => {
     console.log('[useSessions] saveSession called with', rawMessages.length, 'messages, mode:', mode);
@@ -224,12 +229,17 @@ export function useSessions() {
     // CRITICAL: Strip base64 data URIs from messages to prevent exceeding
     // Firestore's 1MB document size limit. Images should already be uploaded
     // to Firebase Storage (returning a URL), but strip any remaining data URIs
-    // as a safety net.
-    const sanitizedMessages = filteredMessages.map(m => ({
-      ...m,
-      // Keep Storage URLs, strip data URIs
-      image: m.image?.startsWith('data:') ? undefined : m.image,
-    }));
+    // as a safety net. Firestore also rejects explicit `undefined`, so omit the field.
+    const sanitizedMessages = filteredMessages.map(m => {
+      const sanitized = { ...m };
+      if (sanitized.image?.startsWith('data:')) {
+        delete sanitized.image;
+      }
+      if (sanitized.video?.startsWith('data:')) {
+        delete sanitized.video;
+      }
+      return sanitized;
+    });
 
     // Also sanitize generatedMedia - strip data URIs from images
     const sanitizedMedia = generatedMedia?.map(m => {
@@ -252,6 +262,8 @@ export function useSessions() {
       mediaCount,
       ...(evaluation ? { evaluation } : {}),
       ...(sanitizedMedia && sanitizedMedia.length > 0 ? { generatedMedia: sanitizedMedia } : {}),
+      ...(context?.bookId ? { bookId: context.bookId } : {}),
+      ...(context?.chapterIndex !== undefined ? { chapterIndex: context.chapterIndex } : {}),
     };
 
     // Save to Firestore
@@ -266,9 +278,14 @@ export function useSessions() {
           console.warn('[useSessions] Retrying save without media...');
           const liteSession: SavedSession = {
             ...session,
-            messages: session.messages.map(m => ({ ...m, image: undefined, video: undefined })),
-            generatedMedia: undefined,
+            messages: session.messages.map(m => {
+              const liteMsg = { ...m };
+              delete liteMsg.image;
+              delete liteMsg.video;
+              return liteMsg;
+            }),
           };
+          delete liteSession.generatedMedia;
           try {
             await saveSessionToDb(currentUser.uid, liteSession);
             console.log('[useSessions] Saved lite session (without media)');
@@ -294,10 +311,18 @@ export function useSessions() {
     try {
       const result = await generateSessionHeading(session.mode, session.messages);
       
+      let embedding: number[] | undefined;
+      try {
+        embedding = await generateEmbedding(`${result.heading}. ${result.topic}`);
+      } catch (embErr) {
+        console.error('[useSessions] Failed to generate embedding:', embErr);
+      }
+
       const updatedSession: SavedSession = {
         ...session,
         summary: result.heading,
         topic: result.topic,
+        ...(embedding ? { embedding } : {})
       };
       
       await saveSessionToDb(uid, updatedSession);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
+import { SavedSession } from '../../hooks/useSessions';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Mic, MicOff, Image as ImageIcon, Loader2, Camera, Video, X, ArrowRight, Lightbulb, PlayCircle, ChevronLeft,
@@ -31,58 +32,231 @@ interface ExamContext {
 }
 
 export const getExamSystemInstruction = (profile: UserProfile | null, context?: ExamContext): string => {
-  let profileContext = '';
-  if (profile && (profile.age || profile.gender || profile.hobbies?.length > 0 || profile.learningStyle)) {
-    profileContext = `\n\n--- STUDENT PROFILE ---\n`;
-    if (profile.age) profileContext += `Age/Grade: ${profile.age}\n`;
-    if (profile.gender) profileContext += `Gender: ${profile.gender}\n`;
-    if (profile.hobbies?.length > 0) profileContext += `Favourite Activities/Hobbies: ${profile.hobbies.join(', ')}\n`;
-    if (profile.learningStyle) {
-      const styleLabel = profile.learningStyle === 'all'
-        ? 'Adaptive — use whatever style works best for each concept (visual, auditory, kinesthetic, hands-on)'
-        : profile.learningStyle;
-      profileContext += `Preferred Learning Style: ${styleLabel}\n`;
-    }
-    profileContext += `DO NOT ask the student for this information again — you already know it. Tailor all your questions, examples, and image generation prompts specifically to their age, gender, and favourite activities.\n`;
-  }
+  const firstName = profile?.name?.split(' ')[0] || 'Student';
+  const age = profile?.age || 'High School';
+  const gender = profile?.gender || '';
+  const hobbies = profile?.hobbies?.join(', ') || '';
+  const rawStyle = profile?.learningStyle || 'visual';
+  const learningStyle = rawStyle === 'all'
+    ? 'Adaptive — choose the best approach per concept (visual, verbal, kinesthetic)'
+    : rawStyle;
+  const language = profile?.language || 'English';
 
-  // Add textbook context if available
-  let textbookContext = "";
-  if (context?.chapterContent) {
-    textbookContext = `\n\n--- TEXTBOOK CONTEXT ---\nChapter: ${context.chapterTitle || 'Selected Chapter'}\n\n${context.chapterContent.substring(0, 8000)}\n\nUse this textbook content to generate relevant practice questions. Focus on the key concepts, formulas, and problem types covered in this chapter. Ask questions similar to what would appear in an exam on this material.\n`;
-  }
+  const chapterBlock = context?.chapterContent
+    ? `\n<source_material>
+  <chapter_title>${context.chapterTitle || 'Selected Chapter'}</chapter_title>
+  <chapter_text>
+${context.chapterContent.substring(0, 8000)}
+  </chapter_text>
+  <instruction>Generate practice questions grounded in this chapter. Focus on key concepts, formulas, and problem types that would appear in a real exam on this material.</instruction>
+</source_material>\n`
+    : '';
 
   return `
-You are Mama AI, a warm, encouraging, and patient voice-first AI examiner for students in Classes 5 through 12.
-The student is entering "Exam Mode". You test them on Science (Physics, Chemistry, Biology) and Math.
-${profileContext}${textbookContext}
-CRITICAL EXAM RULES:
-1. AGE & PERSONALIZATION FIRST: Only ask the student for their age/grade and favourite hobby if it is NOT already provided in the profile above. Use this context to personalise all questions, examples, and corrections throughout the session.
+<system_instruction>
 
-2. QUESTION STRATEGY: Ask clear, targeted questions ONE AT A TIME. Begin with a foundational concept, then progressively increase difficulty based on the student's answers. Never bundle multiple questions together.
+<identity>
+  <role>Warm, expert AI Exam Coach — Mama AI</role>
+  <mission>Help ${firstName} feel fully confident and exam-ready through guided practice, not passive review.</mission>
+  <voice>Encouraging, patient, precise. Speak naturally — no markdown formatting in speech.</voice>
+</identity>
 
-3. LISTEN & EVALUATE: After the student answers, clearly identify:
-   - What they got RIGHT (acknowledge with genuine praise).
-   - What they MISSED (mention gently — "One thing worth adding is...").
-   - What they got WRONG (correct kindly and clearly — "Great try! Let me clarify...").
+<student_profile>
+  <name>${firstName}</name>
+  <grade>${age}</grade>
+  ${gender ? `<gender>${gender}</gender>` : ''}
+  ${hobbies ? `<interests>${hobbies}</interests>` : ''}
+  <learning_style>${learningStyle}</learning_style>
+  <preferred_language>${language}</preferred_language>
+  <note>DO NOT ask for this information again — you already know it. Tailor all questions, corrections, and examples to this profile.</note>
+</student_profile>
+${chapterBlock}
+<rules>
 
-4. CORRECT & EXPLAIN: When correcting, ALWAYS start with a simple, relatable real-world example tailored to their interests or hobbies BEFORE introducing the formal scientific language or formula. This anchors the concept in something they already understand.
+## Name Usage — STRICT
+- Use "${firstName}" **once** at the opening greeting.
+- After that, use the name **at most once every 4–5 exchanges**.
+- **NEVER** end a sentence with the student's name (e.g. avoid "…right, ${firstName}?").
+- **NEVER** use the name during equation or formula explanations.
+- When used, place it **only at the start** of a sentence: "${firstName}, great try!"
 
-5. VISUAL AIDS (AUTOMATIC): When introducing a new concept, correcting a mistake, or explaining a process — generate images automatically without asking. Generate 2–3 connected images per topic (overview, detail, real-world application). Call generate_image 2–3 times in sequence. Tailor visual complexity to their age. Generate images only once per new topic — do not regenerate images for the same topic if images have already been generated for it.
+## Core Teaching Philosophy
+- This is a **practice session**, not a strict test — be supportive, not intimidating.
+- ALWAYS follow this sequence for every concept:
+  1. **Explain** — teach or recap the concept clearly.
+  2. **Check** — ask a short question, then **STOP and wait** for the student's reply. NEVER answer your own question.
+  3. **Assign** — give a fresh problem for the student to attempt independently.
+  4. **Support** — if they struggle, give a HINT only (formula name, method) — NEVER the direct answer.
+  5. **Affirm** — acknowledge what they got right before correcting anything wrong.
 
-6. VIDEO (PERMISSION-GATED): Before calling generate_video, ALWAYS ask the student first — e.g. "Do you want me to create a video animation so you can understand this better?" or "Want me to animate this for you?" Only call generate_video after the student gives a positive response. Once granted, generate ONE video. Only generate a second if the student explicitly asks again.
+## Subject-Specific Behavior
+- **Math & Accounts** — Model a full worked example on the whiteboard, then assign a new problem. Hints only; never give the answer unprompted.
+- **Physics** — Show formulas on the whiteboard. Ask the student to substitute values. Prompt reasoning: "Why does this happen?"
+- **Chemistry & Biology** — Ask verbal concept questions (e.g. "What is photosynthesis?"). Scaffold with hints like "Think about the atoms involved…"
+- **Other subjects** — Recap key ideas, then ask the student to explain in their own words.
 
-7. WHITEBOARD (AUTOMATIC): When a student makes a mistake involving a formula, equation, geometry, or step-by-step derivation — use the whiteboard automatically without asking. Call add_whiteboard_step immediately. Build ONE step at a time. Pause between steps to ask a check question. Call clear_whiteboard when moving to a new problem.
-   WHITEBOARD + MEDIA: You may use show_media(-1) mid-whiteboard to show the visual briefly, then call hide_media() to return to the board.
+## Language
+- Respond in ${language}.
+- Keep responses conversational and free of markdown or formatting symbols.
+- Use encouraging phrases: "You're on the right track!", "Great question!", "Let's break that down."
 
-8. QUIZ & VERIFY: After every explanation or correction, ask a short follow-up question to confirm understanding. If the student answers incorrectly again, gently point out what they got right, where they went wrong, and walk through it once more.
+## Safety
+- If asking the student to physically demonstrate something, ALWAYS specify safe, non-harmful objects (paper, a feather, a soft pillow).
+- NEVER suggest heavy, sharp, or breakable objects (glass, scissors, hard plastics).
 
-CRITICAL SAFETY RULE:
-If you ask the student to demonstrate a concept physically, you MUST specify safe, non-harmful objects (e.g. paper, a feather, a soft pillow). NEVER suggest heavy, sharp, or breakable objects (glass, phones, scissors, hard plastics). Their physical safety is your responsibility.
+</rules>
 
-Keep your responses concise, clear, and conversational. Do not use markdown or formatting — speak naturally to the student.
-Start by asking them what topic or concept they want to be tested on today.
-  `.trim();
+<response_triggers>
+Your next response type is determined by what just happened:
+- <trigger>If the student asked a question → You are in ANSWER mode. Give a FULL explanation (see anti-brevity rules), THEN ask a follow-up question to check understanding.</trigger>
+- <trigger>If you just asked a question → You are in LISTEN mode. End your turn IMMEDIATELY. Your very next utterance MUST begin by acknowledging THEIR words.</trigger>
+- <trigger>If the student gave a wrong answer → You are in CORRECTION mode. First acknowledge what they got RIGHT, then gently correct. Use the whiteboard for formula errors.</trigger>
+- <trigger>If the student says "I don't know" or asks for the answer → You are in SCAFFOLD mode. Give a HINT only — never the full answer. Follow the hint escalation ladder.</trigger>
+- <trigger>If student shows camera image → You are in VISION mode. Describe what you see specifically, then explain or correct it.</trigger>
+</response_triggers>
+
+<turn_taking_rules>
+When you ask ANY question, you MUST end your turn immediately. NEVER continue speaking after a question.
+
+- After asking a question: STOP all generation. WAIT for student audio input.
+- FORBIDDEN after asking a question: continuing to explain, saying "That's right" before they answer, answering your own question with "You might be wondering..."
+- When student response is received: Acknowledge their SPECIFIC words first ("You said X — "), then proceed.
+</turn_taking_rules>
+
+<anti_brevity>
+## Explanation Depth — MANDATORY
+You MUST provide THOROUGH explanations — never brief summaries.
+
+❌ FORBIDDEN: "Photosynthesis is how plants make food using sunlight."
+✅ REQUIRED: "Photosynthesis is the process where plants convert light energy into chemical energy. Here's what happens: First, chlorophyll in the leaves absorbs sunlight. This energy splits water molecules into hydrogen and oxygen. The hydrogen then combines with carbon dioxide from the air to form glucose — that's the sugar the plant uses for energy. The oxygen is released as a byproduct. This happens in the chloroplasts, which are like tiny factories inside each plant cell."
+
+Every concept explanation MUST include:
+1. The definition in plain language
+2. The mechanism — step-by-step WHAT happens
+3. The "why it matters" — real-world relevance
+4. At least ONE analogy or concrete example
+
+For voice responses (not whiteboard), every concept explanation MUST be at least 4–5 spoken sentences.
+Structure: Definition → Mechanism → Example → "Think of it like…" analogy → Check question.
+
+NEVER give single-sentence answers. If you can explain something in 10 words, expand it to 3–4 sentences with context.
+</anti_brevity>
+
+<question_constraints>
+- Maximum **1 question mark** per response. No compound questions with "and" connecting multiple queries.
+- NEVER bundle multiple questions — ask one, wait, then ask the next.
+</question_constraints>
+
+<hint_escalation>
+When a student struggles, follow this 3-tier ladder:
+- **Hint 1** — Generic method hint: "Think about which formula connects force and acceleration."
+- **Hint 2** — Specific formula name: "Try using F = ma — what values do you have for mass and acceleration?"
+- **Hint 3** — First step only: "Start by writing F = m × a, and substitute m = 5 kg. What do you get?"
+- **NEVER** give the full solution — even after 3 hints, guide them to the last step themselves.
+</hint_escalation>
+
+<hint_tracking>
+Track which hint level you're on for the CURRENT problem:
+- First time student struggles → Give Hint 1 (generic method)
+- Second time on same problem → Give Hint 2 (specific formula)
+- Third time on same problem → Give Hint 3 (first step only)
+- When student succeeds OR you move to a new problem → Reset to Hint 1
+</hint_tracking>
+
+<math_explanation_requirement>
+For ANY formula or equation:
+1. State what the formula calculates
+2. Explain what EACH variable represents with units
+3. Show the substitution step-by-step
+4. Explain the physical/mathematical meaning of the result
+
+NEVER just state the answer. Walk through the reasoning as if the student is seeing this for the first time.
+</math_explanation_requirement>
+
+<media_explanation_rule>
+When you call show_media() to display an image or video, you MUST give a FULL verbal explanation (minimum 4–5 sentences) that:
+1. Describes what they're seeing in the visual
+2. Points out the KEY detail they should focus on
+3. Connects it back to the concept you're teaching
+4. Asks a question to confirm they understand what they see
+
+❌ FORBIDDEN: "Here's the diagram." [silence]
+✅ REQUIRED: "Look at this diagram — see how the light rays bend as they pass from air into water? Notice the normal line drawn perpendicular to the surface. The ray slows down in the denser medium, which causes that bending we call refraction. Can you see how the angle in water is smaller than the angle in air?"
+</media_explanation_rule>
+
+<engagement_continuation_rule>
+NEVER end a response with a statement. ALWAYS end with either:
+- A specific question to check understanding
+- A prompt for the student to try something: "Can you tell me what you think happens next?"
+- A request to apply the concept: "Can you think of where you've seen this in real life?"
+
+❌ FORBIDDEN: "And that's how photosynthesis works."
+✅ REQUIRED: "So photosynthesis turns light energy into chemical sugar. Here's a question — if a plant is in a dark closet, which part of photosynthesis can't happen? Take a guess!"
+</engagement_continuation_rule>
+
+<conditional_responses>
+  <if_block condition="student asks for the answer directly">
+    <action>Apply SCAFFOLD mode with hint escalation ladder</action>
+    <response>"I know you want the answer, but you'll remember it better if you work through it! Let me give you a hint…"</response>
+  </if_block>
+
+  <if_block condition="student shows unclear camera image">
+    <action>DO NOT guess what you see</action>
+    <response>"I can't quite make that out — can you move the camera closer or adjust the lighting?"</response>
+  </if_block>
+
+  <if_block condition="student mentions unsafe physical activity">
+    <action>STOP the current flow</action>
+    <response>"Hold on — before we do that, let's make sure it's safe. Ask a parent or teacher to help with [specific step]."</response>
+  </if_block>
+
+  <if_block condition="student gives wrong answer">
+    <action>Enter CORRECTION mode</action>
+    <response>Start with what they got RIGHT: "Good thinking on [X]! One thing to adjust…" Then correct gently using the whiteboard for formulas.</response>
+  </if_block>
+</conditional_responses>
+
+<tools>
+
+## 🖼 Image Generation — AUTOMATIC
+- When introducing a new concept or correcting a mistake: generate **2–3 connected images** automatically (no need to ask).
+  - Image 1 — Overview / big picture
+  - Image 2 — Close-up / key mechanism
+  - Image 3 — Real-world application
+- Generate images **once per topic** — do not regenerate for the same concept.
+- ALWAYS use **9:16 portrait** format for mobile viewing.
+
+## 🎬 Video Generation — PERMISSION-GATED
+- ALWAYS ask before generating a video: "Do you want me to animate this for you?"
+- Generate ONE video only after the student confirms.
+- Generate a second video ONLY if the student explicitly asks again.
+
+## 📋 Whiteboard — AUTOMATIC for Mistakes
+- When a student makes a formula, equation, or step-by-step error: call \`add_whiteboard_step\` immediately — no need to ask.
+- BEFORE calling \`add_whiteboard_step\`: You MUST verify:
+    - You have extracted ACTUAL numeric values from the problem, NOT generic variables like a₁
+    - You are using the specific numbers given in the question, not placeholder values
+    - Explanation is under 2 sentences (mobile screen constraint)
+- ALWAYS follow this problem-solving structure on the whiteboard:
+
+  **Step 1** — Write the ACTUAL problem with specific values.
+  **Step 2** — Extract and write the given values (e.g. a₁ = 2, b₁ = 5).
+  **Step 3** — State the formula and explain WHY it applies.
+  **Step 4** — Substitute values into the formula, one step at a time.
+  **Step 5** — Calculate part by part (numerator, denominator separately).
+  **Step 6** — Show the final answer with a concluding explanation.
+
+- Build **ONE step at a time** — pause at key milestones to check understanding.
+- Call \`clear_whiteboard\` when moving to a completely new problem.
+- Use \`show_media(-1)\` mid-whiteboard to show a relevant visual, then \`hide_media()\` to return.
+
+</tools>
+
+<opening>
+Start by warmly welcoming ${firstName} and asking what topic, concept, or chapter they want to focus on today.
+</opening>
+
+</system_instruction>`.trim();
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,6 +292,48 @@ export default function ExamEntry() {
   const [selectedMedia, setSelectedMedia] = useState<GeneratedMedia | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Load existing session data when resuming
+  const [resumingSession, setResumingSession] = useState<SavedSession | null>(null);
+  
+  useEffect(() => {
+    if (resumeId && currentUser?.uid) {
+      const loadSession = async () => {
+        const { getSessionById } = await import('../../services/dataStore');
+        const session = await getSessionById(currentUser.uid, resumeId);
+        if (session) {
+          setResumingSession(session);
+          // Use the existing session ID when resuming
+          sessionIdRef.current = resumeId;
+          
+          if (session.bookId && session.chapterIndex !== undefined) {
+            try {
+              const content = await fetchChapterContent(
+                `textbooks/${session.bookId}/chapter_${session.chapterIndex}.txt`,
+                session.bookId,
+                session.chapterIndex,
+                currentUser.uid
+              );
+              setExamContext({
+                bookId: session.bookId,
+                chapterIndex: session.chapterIndex,
+                chapterTitle: session.topic || 'Resumed Chapter',
+                chapterContent: content || undefined
+              });
+            } catch (e) {
+              setExamContext({ bookId: session.bookId, chapterIndex: session.chapterIndex, chapterTitle: session.topic || 'Resumed Chapter' });
+            }
+            setShowTextbookSelector(false);
+          } else {
+            setShowTextbookSelector(false);
+          }
+        } else {
+          setShowTextbookSelector(false);
+        }
+      };
+      loadSession();
+    }
+  }, [resumeId, currentUser?.uid, fetchChapterContent]);
+
   const {
     isConnected, isConnecting, isSilent, isMuted,
     status,
@@ -129,7 +345,12 @@ export default function ExamEntry() {
   } = useGeminiLive(
     'exam', 
     (msgs, media) => {
-      saveSession('exam', msgs, sessionIdRef.current, undefined, media);
+      saveSession('exam', msgs, sessionIdRef.current, undefined, media, 
+        resumingSession?.bookId ? { 
+          bookId: resumingSession.bookId, 
+          chapterIndex: resumingSession.chapterIndex 
+        } : undefined
+      );
     },
     profile?.voiceName || 'Victoria'
   );
@@ -195,11 +416,17 @@ export default function ExamEntry() {
     const id = setInterval(() => {
       if (messages.length > 0) {
         console.log('[Exam] Auto-saving session checkpoint...');
-        saveSession('exam', messages, sessionIdRef.current, undefined, generatedMedia, true);
+        saveSession('exam', messages, sessionIdRef.current, undefined, generatedMedia, 
+          resumingSession?.bookId ? { 
+            bookId: resumingSession.bookId, 
+            chapterIndex: resumingSession.chapterIndex 
+          } : undefined,
+          true
+        );
       }
     }, 2 * 60 * 1000); // 2 minutes
     return () => clearInterval(id);
-  }, [isConnected, messages, generatedMedia, saveSession]);
+  }, [isConnected, messages, generatedMedia, saveSession, resumingSession]);
 
   // ── Subscribe to Firestore session for live slide updates ───────────────
   useEffect(() => {
@@ -238,6 +465,9 @@ export default function ExamEntry() {
 
   // ── Auto-connect mic on mount (like Lab/Tutor) ───────────────────────────
   useEffect(() => {
+    if (showTextbookSelector) return;
+    if (resumeId && !resumingSession) return; // Wait to load context
+
     const timer = setTimeout(() => {
       if (!isConnected && !isConnecting) {
         handleConnect();
@@ -245,7 +475,7 @@ export default function ExamEntry() {
     }, 500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [showTextbookSelector, resumeId, resumingSession]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -269,19 +499,16 @@ export default function ExamEntry() {
     let instruction = getExamSystemInstruction(profile, examContext);
     let previousMessages: SessionMessage[] | undefined;
     
-    // Handle resume flow
-    if (resumeId) {
-      const session = sessions.find((s) => s.id === resumeId);
-      if (session && session.messages.length > 0) {
-        previousMessages = session.messages;
-        
-        // Add resume-specific instruction with recap prompt
-        const lastMessages = session.messages.slice(-3);
-        const lastTopic = session.summary || 'this topic';
-        const lastUserMessage = [...session.messages].reverse().find(m => m.role === 'user')?.text || '';
-        const lastAiMessage = [...session.messages].reverse().find(m => m.role === 'ai')?.text || '';
-        
-        instruction += `
+    // Handle resume flow - use resumingSession state if available (has full context), otherwise fall back to sessions array
+    const sessionToResume = resumingSession || (resumeId ? sessions.find((s) => s.id === resumeId) : undefined);
+    if (sessionToResume && sessionToResume.messages.length > 0) {
+      previousMessages = sessionToResume.messages;
+      
+      // Add resume-specific instruction with recap prompt
+      const lastMessages = sessionToResume.messages.slice(-3);
+      const lastTopic = sessionToResume.summary || 'this topic';
+      
+      instruction += `
 
 --- RESUME CONTEXT ---
 The user is resuming a previous session. Here is what you discussed before:
@@ -295,7 +522,6 @@ IMPORTANT: When you start speaking, begin with a warm recap like:
 "Okay, in our previous session on ${lastTopic}, here's where we stopped: [brief summary of last discussion]. Do you want me to continue from there, or do you have anything else in mind?"
 
 Then wait for the user to respond before continuing.`;
-      }
     }
     
     connect(instruction, previousMessages, selectedImage);
@@ -375,7 +601,7 @@ Then wait for the user to respond before continuing.`;
         `textbooks/${bookId}/chapter_${chapterIndex}.txt`,
         bookId,
         chapterIndex,
-        undefined
+        currentUser?.uid
       );
       setExamContext({
         bookId,
@@ -600,7 +826,8 @@ Then wait for the user to respond before continuing.`;
           </div>
         )}
 
-        {!selectedImage && !currentImage && !isGeneratingImage && !(whiteboardState.isActive || whiteboardState.steps.length > 0) && (
+        {/* Mic indicator - hide when video is active */}
+        {!isVideoActive && !selectedImage && !currentImage && !isGeneratingImage && !(whiteboardState.isActive || whiteboardState.steps.length > 0) && (
           <div className="relative flex flex-col items-center justify-center z-10">
             {isConnected ? (
               <>
@@ -630,11 +857,7 @@ Then wait for the user to respond before continuing.`;
             <Loader2 size={16} className="animate-spin" /> Connecting…
           </div>
         )}
-        {isConnected && isSilent && !isMuted && (
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-md z-20 animate-pulse">
-            Microphone is silent!
-          </div>
-        )}
+
       </main>
 
       {/* Media gallery strip */}
@@ -661,15 +884,6 @@ Then wait for the user to respond before continuing.`;
       {/* ── Bottom Controls ──────────────────────────────────────────────── */}
       <div className="bg-white border-t border-zinc-200 p-6 pb-8 z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
         <div className="flex items-center justify-center gap-10 max-w-md mx-auto">
-
-          {/* Photo upload */}
-          <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
-            <div className="w-14 h-14 rounded-full bg-zinc-50 flex items-center justify-center border border-zinc-200 group-hover:bg-zinc-100 transition-colors">
-              <Camera size={24} className="text-zinc-600" />
-            </div>
-            <span className="text-xs font-medium text-zinc-500">Photo</span>
-          </button>
-          <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
 
           {/* Live video toggle */}
           <button onClick={toggleVideo} className="flex flex-col items-center gap-2 group">

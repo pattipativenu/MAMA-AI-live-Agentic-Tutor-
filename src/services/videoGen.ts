@@ -1,7 +1,7 @@
 /**
  * videoGen.ts — Educational video generation with caching integration
  * 
- * Uses Veo 3 (veo-3.0-generate-001) for 8-second silent diagram/equation animations
+ * Uses Veo 3.1 Fast (veo-3.1-fast-generate-preview) for 8-second silent diagram/equation animations
  * Integrates with mediaCache.ts for per-user topic-based caching
  * 
  * Key Features:
@@ -12,7 +12,7 @@
  * - Firestore-based async job management
  */
 
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, type GenerateVideosConfig } from '@google/genai';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, onSnapshot, collection, query, where, orderBy, getDocs, Unsubscribe } from 'firebase/firestore';
 import { storage, db } from '../firebase';
@@ -23,20 +23,25 @@ import {
   CachedMedia 
 } from './mediaCache';
 
-// Initialize the SDK
+// Initialize the SDK with v1beta API version
 const ai = new GoogleGenAI({
-  apiKey: import.meta.env.VITE_GEMINI_API_KEY
+  apiKey: import.meta.env.VITE_GEMINI_API_KEY,
+  httpOptions: { apiVersion: 'v1beta' }
 });
 
-// Veo 3 model for silent 2D/3D diagram animations (Gemini narrates via Live API)
-const VEO_MODEL = 'veo-3.0-generate-001';
+// Veo 3.1 Fast model for silent 2D/3D diagram animations (Gemini narrates via Live API)
+const VEO_MODEL = 'veo-3.1-fast-generate-preview';
 
 export interface VideoGenerationOptions {
   age?: string;
   theme?: 'realistic' | 'space' | 'anime' | 'historical' | 'action';
   aspectRatio?: '16:9' | '9:16';
-  resolution?: '720p' | '1080p';
-  personGeneration?: 'DONT_ALLOW' | 'ALLOW_ADULT';
+  resolution?: '720p' | '1080p' | '4k';
+  personGeneration?: 'dont_allow' | 'allow_adult' | 'allow_all';
+  subject?: string;
+  numberOfVideos?: number;
+  durationSeconds?: number;
+  visualStyle?: 'diagram-only' | 'real-world-only' | 'transformation';
 }
 
 // ── Theme aesthetics for Veo 2 ───────────────────────────────────────────────
@@ -61,29 +66,116 @@ const VIDEO_THEME_AESTHETICS: Record<string, string> = {
  * - 100–150 words
  * - 5-part formula: Shot, Subject, Action, Setting, Aesthetics
  * - 8-second timeline mapping (0-2s, 2-6s, 6-8s)
+ * - Highlights transformation from real world to theoretical diagram
  * - No dialogue, no text overlays
  */
-function buildVideoPrompt(concept: string, age: string = '', theme: string = 'realistic'): string {
+function buildVideoPrompt(concept: string, age: string = '', theme: string = 'realistic', subject: string = 'Science', visualStyle: string = 'diagram-only'): string {
   const audienceNote = age
     ? `Calibrated for a ${age} student — visually engaging and clear without being oversimplified.`
     : 'Visually clear and appropriately detailed for high-school students.';
 
   const aesthetic = VIDEO_THEME_AESTHETICS[theme] ?? VIDEO_THEME_AESTHETICS.realistic;
 
+  // Diagram-only prompt (matches textbook diagrams)
+  if (visualStyle === 'diagram-only') {
+    return `
+An 8-second COMPLETELY SILENT educational animation demonstrating: "${concept}" for a ${subject} class.
+
+TIMING STRUCTURE (CRITICAL):
+• 0–3 seconds: SETUP PHASE
+  - Instantly establish all diagram elements (objects, rays, dimensions, labels, axes)
+  - All components must be visible and positioned by 3-second mark
+  - Minimal movement - just assembly/appearance of elements
+
+• 3–5 seconds: EXPLANATION PHASE
+  - Animate the core concept (arrows moving, rays propagating, forces acting, etc.)
+  - Show relationships through motion (energy transfer, wave propagation, particle collision)
+  - Write/reveal key equations or formulas if needed
+  - By 5 seconds, ALL content must be fully rendered
+
+• 5–8 seconds: COMPLETION PHASE
+  - Video should be essentially finished by 5 seconds
+  - Use 5-8s only for gentle camera pull-back or final emphasis
+  - NO new content introduced after 5 seconds
+  - Clean completion with full diagram visible
+
+SHOT COMPOSITION: Clean, minimal abstract textbook diagram. Professional academic visualization.
+
+SUBJECT DETAILS: Pure theoretical diagram showing the concept with labeled parts, arrows, and annotations exactly as it appears in a science textbook. ${audienceNote}
+
+SETTING: Clean, minimal academic background - neutral gradient or subtle grid. Professional educational aesthetic.
+
+AESTHETICS: ${aesthetic}
+
+CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. Pure silent visual diagram animation only.
+    `.trim();
+  }
+
+  // Real-world only prompt
+  if (visualStyle === 'real-world-only') {
+    return `
+An 8-second COMPLETELY SILENT educational animation demonstrating: "${concept}" for a ${subject} class.
+
+TIMING STRUCTURE (CRITICAL):
+• 0–3 seconds: SETUP PHASE
+  - Instantly establish the real-world scene (all objects, environment, lighting)
+  - All elements must be visible and positioned by 3-second mark
+  - Camera positioned, scene fully set
+
+• 3–5 seconds: EXPLANATION PHASE
+  - The concept happens (water flowing, ball falling, reaction occurring, etc.)
+  - Core phenomenon clearly demonstrated through natural motion
+  - By 5 seconds, ALL action must be complete
+
+• 5–8 seconds: COMPLETION PHASE
+  - Phenomenon essentially finished by 5 seconds
+  - Use 5-8s only for aftermath or camera movement to emphasize result
+  - NO new action after 5 seconds
+  - Clean ending showing outcome
+
+SHOT COMPOSITION: Highly relatable, tangible REAL-WORLD example of ${concept} in everyday life.
+
+SUBJECT DETAILS: Photorealistic real-world scenario where ${concept} naturally occurs. Every detail scientifically accurate. ${audienceNote}
+
+SETTING: Familiar real-world environment where students would encounter this concept.
+
+AESTHETICS: ${aesthetic}
+
+CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. Pure silent visual demonstration only.
+    `.trim();
+  }
+
+  // Transformation prompt (default/fallback - real-world morphing to diagram)
   return `
-An 8-second silent educational animation demonstrating: "${concept}".
+An 8-second COMPLETELY SILENT educational animation demonstrating: "${concept}" for a ${subject} class.
 
-SHOT COMPOSITION: Opens (0–2 s) with a clean wide establishing shot that immediately frames all key elements of ${concept}. Camera slowly pushes in, building focus on the central subject.
+TIMING STRUCTURE (CRITICAL):
+• 0–3 seconds: SETUP & REAL-WORLD PHASE
+  - Instantly establish real-world example (objects, environment, all elements visible)
+  - Show the concept in action in physical form
+  - All real-world elements fully rendered by 3-second mark
 
-SUBJECT DETAILS: ${concept} depicted with scientific accuracy — vibrant colour-coded components, crisp edges, and clear spatial relationships between all interacting parts. Every element visually distinct.
+• 3–5 seconds: TRANSFORMATION PHASE
+  - Real-world objects smoothly morph into abstract diagram
+  - Transformation must be COMPLETE by 5-second mark
+  - Motion blur, glow lines tracking the morphing process
+  - By 5 seconds, diagram must be fully formed with all labels, arrows, equations
 
-ACTION SEQUENCE (2–6 s): The core physical process within "${concept}" unfolds through a smooth, deliberate sequence. Motion blur, flow lines, and particle effects highlight direction of movement, energy transfer, or transformation. Cause and effect are unmistakable.
+• 5–8 seconds: COMPLETION PHASE
+  - Diagram transformation essentially finished by 5 seconds
+  - Use 5-8s only for gentle camera pull-back or final emphasis
+  - NO new transformations or content after 5 seconds
+  - Clean ending showing complete theoretical diagram
 
-SETTING: Clean, minimal environment. ${audienceNote}
+SHOT COMPOSITION: Opens with highly relatable, tangible REAL-WORLD example, transitions to abstract textbook diagram.
 
-AESTHETICS & MOOD (6–8 s): ${aesthetic} Final frames show the concept's key outcome with a satisfying visual resolution — gentle pull-back or slow-motion freeze that encapsulates the core insight.
+SUBJECT DETAILS: The subject matter (${subject}) must be scientifically and theoretically accurate. Every element visually distinct. ${audienceNote}
 
-CRITICAL: No dialogue. No voiceover. No text overlays. No captions. Silent visual animation only.
+SETTING: Starts grounded real-world, then transitions into a clean, minimal abstract environment.
+
+AESTHETICS: ${aesthetic}
+
+CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. No text overlays. No captions. Silent visual animation only.
   `.trim();
 }
 
@@ -108,12 +200,12 @@ export interface VideoJob {
 // ── Main video generation function ───────────────────────────────────────────
 
 /**
- * Generates video using Veo 2 with caching integration
+ * Generates video using Veo 3.1 Fast with caching integration
  * 
  * Flow:
  * 1. Check cache first (return cached if hit)
  * 2. Check if should skip (short concepts, chapter titles)
- * 3. Generate using Veo 2
+ * 3. Generate using Veo 3.1 Fast
  * 4. Upload to Cloud Storage
  * 5. Store in cache
  * 6. Return URL
@@ -131,7 +223,10 @@ export async function generateEducationalVideo(
     age = '',
     theme = 'realistic',
     aspectRatio = '9:16',
-    personGeneration = 'ALLOW_ADULT'
+    subject = 'Science',
+    numberOfVideos = 1,
+    durationSeconds = 8,
+    visualStyle = 'diagram-only',
   } = options;
 
   // Check cache first
@@ -145,80 +240,123 @@ export async function generateEducationalVideo(
     };
   }
 
-  const prompt = buildVideoPrompt(concept, age, theme);
-  console.log(`[VideoGen] Starting Veo 3 generation for: ${concept}`);
+  const prompt = buildVideoPrompt(concept, age, theme, subject, visualStyle);
+  console.log(`[VideoGen] Starting Veo 3.1 Fast generation for: ${concept}`);
   console.log(`[VideoGen] Prompt length: ${prompt.length} chars`);
 
   try {
-    // Check if Veo 3 is available (skip if not)
-    console.log(`[VideoGen] Checking Veo 3 availability...`);
+    // Start video generation with Veo 3.1 Fast (silent; Gemini narrates via Live API)
+    console.log(`[VideoGen] Calling Veo API with model: ${VEO_MODEL}`);
     
-    // Start video generation with Veo 3 (silent; Gemini narrates via Live API)
     let operation;
     try {
+      // Official JS SDK call: ai.models.generateVideos({ model, prompt, config })
+      // Reference: https://ai.google.dev/gemini-api/docs/video
       operation = await ai.models.generateVideos({
         model: VEO_MODEL,
         prompt,
         config: {
           aspectRatio,
-          personGeneration,
-          generateAudio: false
-        }
+          numberOfVideos,
+          durationSeconds,
+        } as GenerateVideosConfig
       });
+      
+      console.log(`[VideoGen] Operation started: ${operation.name}`);
     } catch (veoError: any) {
+      console.error('[VideoGen] Veo API error:', veoError);
       if (veoError.message?.includes('404') || veoError.message?.includes('not found')) {
-        console.error('[VideoGen] Veo 3 model not found (404). Your project may not have access to Veo 3 yet.');
-        console.error('[VideoGen] To enable Veo 3:');
-        console.error('  1. Go to Google Cloud Console > Vertex AI > Models');
-        console.error('  2. Search for "Veo 3" and request access');
-        console.error('  3. Approval typically takes 1-3 business days');
-        throw new Error('Veo 3 not available. Please request access in Google Cloud Console or use image generation instead.');
+        console.error('[VideoGen] Veo 3.1 model not found (404). Your API key may not have access to Veo 3.1 yet.');
+        console.error('[VideoGen] To enable Veo 3.1:');
+        console.error('  1. Go to Google AI Studio (https://aistudio.google.com/)');
+        console.error('  2. Navigate to API keys and ensure Veo access is enabled');
+        console.error('  3. Or use Google Cloud Console > Vertex AI > Models');
+        throw new Error('Veo 3.1 not available. Please check your API key has Veo access or use image generation instead.');
       }
       throw veoError;
     }
 
-    // Poll for completion
+    // Poll for completion (following Python SDK pattern)
     let completedOperation = operation;
-    console.log(`[VideoGen] Polling operation: ${operation.name}`);
-    
     let pollCount = 0;
-    const maxPolls = 30; // 5 minutes max (10s * 30)
+    const maxPolls = 60; // 10 minutes max (10s * 60) - Veo can take time
+    
+    console.log(`[VideoGen] Waiting for video generation...`);
     
     while (!completedOperation.done && pollCount < maxPolls) {
+      console.log(`[VideoGen] Video has not been generated yet. Check again in 10 seconds... (poll ${pollCount + 1}/${maxPolls})`);
       await new Promise(resolve => setTimeout(resolve, 10000)); // 10 second intervals
       
-      completedOperation = (await ai.operations.getVideosOperation({
-        operation: completedOperation as any
-      })) as typeof operation;
+      // CORRECT polling method per official Gemini API JS SDK docs:
+      // https://ai.google.dev/gemini-api/docs/video (JavaScript section)
+      // Must use getVideosOperation(), NOT operations.get()
+      completedOperation = await ai.operations.getVideosOperation({
+        operation: completedOperation
+      });
       
       pollCount++;
-      console.log(`[VideoGen] Poll ${pollCount}, done: ${completedOperation.done}`);
     }
 
     if (!completedOperation.done) {
-      throw new Error('Video generation timed out after 5 minutes');
+      throw new Error('Video generation timed out after 10 minutes');
     }
 
-    // Extract video
-    const generatedVideo = completedOperation.response?.generatedVideos?.[0];
-    if (!generatedVideo?.video?.uri) {
-      throw new Error('Video generation failed - no video URI in response');
+    // Check for errors
+    if (completedOperation.error) {
+      throw new Error(`Video generation failed: ${completedOperation.error.message || 'Unknown error'}`);
     }
 
-    console.log(`[VideoGen] Video ready, downloading from: ${generatedVideo.video.uri}`);
+    // Extract video from result.
+    // Official JS SDK: operation.response.generatedVideos[0].video
+    // Reference: https://ai.google.dev/gemini-api/docs/video
+    const response = (completedOperation as any).response;
+    if (!response) {
+      console.error('[VideoGen] No response on completed operation. Full operation:', JSON.stringify(completedOperation, null, 2));
+      throw new Error('Video generation failed — operation completed but response is empty');
+    }
 
-    // Download video (URI may require API key for Google API URLs)
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-    const videoUri = generatedVideo.video.uri;
-    const downloadUrlWithKey = videoUri.includes('generativelanguage.googleapis.com') && apiKey
-      ? `${videoUri}${videoUri.includes('?') ? '&' : '?'}key=${apiKey}`
-      : videoUri;
-    const videoResponse = await fetch(downloadUrlWithKey);
-    if (!videoResponse.ok) {
-      throw new Error(`Failed to download video: ${videoResponse.statusText}`);
+    const generatedVideos = response.generatedVideos;
+    if (!generatedVideos || generatedVideos.length === 0) {
+      console.error('[VideoGen] response.generatedVideos empty. Full response:', JSON.stringify(response, null, 2));
+      throw new Error('No videos were generated — operation succeeded but returned no video data');
+    }
+
+    const generatedVideo = generatedVideos[0];
+    console.log(`[VideoGen] Video generated successfully: ${generatedVideo.video?.uri || 'no uri'}`);
+
+    // Get the video file object
+    const videoFile = generatedVideo.video;
+    if (!videoFile) {
+      throw new Error('Video file not found in generation result');
+    }
+
+    // Download the video
+    let videoBlob: Blob;
+    try {
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      const videoUri = videoFile.uri;
+      if (!videoUri) {
+        throw new Error('Video URI not available');
+      }
+      
+      // Fetch via URI with API key
+      const downloadUrlWithKey = videoUri.includes('generativelanguage.googleapis.com') && apiKey
+        ? `${videoUri}${videoUri.includes('?') ? '&' : '?'}key=${apiKey}`
+        : videoUri;
+        
+      console.log(`[VideoGen] Downloading from: ${downloadUrlWithKey.substring(0, 100)}...`);
+      
+      const videoResponse = await fetch(downloadUrlWithKey);
+      if (!videoResponse.ok) {
+        throw new Error(`Failed to download video: ${videoResponse.statusText}`);
+      }
+      
+      videoBlob = await videoResponse.blob();
+    } catch (downloadError) {
+      console.error('[VideoGen] Download error:', downloadError);
+      throw new Error('Failed to download generated video');
     }
     
-    const videoBlob = await videoResponse.blob();
     console.log(`[VideoGen] Downloaded ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
 
     // Upload to Firebase Storage
@@ -236,7 +374,7 @@ export async function generateEducationalVideo(
     });
     
     const downloadUrl = await getDownloadURL(videoRef);
-    console.log(`[VideoGen] Uploaded to: ${downloadUrl}`);
+    console.log(`[VideoGen] Uploaded to Firebase Storage: ${downloadUrl}`);
 
     // Store in cache
     await storeMediaInCache(
@@ -372,15 +510,19 @@ export function subscribeToVideoJobs(
   onUpdate: (jobs: VideoJob[]) => void
 ): Unsubscribe {
   const jobsRef = collection(db, 'videoJobs');
+  // Querying only by sessionId completely prevents the need for a complex Firestore composite index
   const q = query(
     jobsRef,
-    where('userId', '==', userId),
-    where('sessionId', '==', sessionId),
-    orderBy('createdAt', 'desc')
+    where('sessionId', '==', sessionId)
   );
 
   return onSnapshot(q, (snapshot) => {
-    const jobs = snapshot.docs.map(doc => doc.data() as VideoJob);
+    let jobs = snapshot.docs.map(doc => doc.data() as VideoJob);
+    // Filter by userId and sort client-side to avoid Index errors
+    jobs = jobs
+      .filter(job => job.userId === userId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+      
     console.log(`[VideoGen] Jobs updated: ${jobs.length} jobs`);
     onUpdate(jobs);
   }, (error) => {
@@ -394,16 +536,21 @@ export function subscribeToVideoJobs(
 export async function getSessionVideos(userId: string, sessionId: string): Promise<VideoJob[]> {
   try {
     const jobsRef = collection(db, 'videoJobs');
+    // Querying only by sessionId completely prevents the need for a complex Firestore composite index
     const q = query(
       jobsRef,
-      where('userId', '==', userId),
-      where('sessionId', '==', sessionId),
-      where('status', '==', 'completed'),
-      orderBy('completedAt', 'desc')
+      where('sessionId', '==', sessionId)
     );
     
     const snap = await getDocs(q);
-    return snap.docs.map(doc => doc.data() as VideoJob);
+    let jobs = snap.docs.map(doc => doc.data() as VideoJob);
+    
+    // Filter and sort client-side
+    jobs = jobs
+      .filter(job => job.userId === userId && job.status === 'completed')
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+      
+    return jobs;
   } catch (error) {
     console.error('[VideoGen] Error getting session videos:', error);
     return [];

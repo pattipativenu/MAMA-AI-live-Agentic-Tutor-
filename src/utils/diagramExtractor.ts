@@ -366,9 +366,9 @@ Return as JSON.
 }
 
 /**
- * Generate text embedding for semantic search
+ * Generate multimodal embedding for semantic search
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(text: string, imageBase64?: string): Promise<number[]> {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('No Gemini API key found');
@@ -376,9 +376,16 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
   const ai = new GoogleGenAI({ apiKey });
 
+  const contents: any = imageBase64 ? {
+    parts: [
+      { text },
+      { inlineData: { mimeType: 'image/png', data: imageBase64 } }
+    ]
+  } : text;
+
   const result = await ai.models.embedContent({
-    model: 'text-embedding-004',
-    contents: text
+    model: 'gemini-embedding-2-preview',
+    contents: contents
   });
 
   return result.embeddings[0].values;
@@ -508,7 +515,7 @@ export async function extractDiagramsFromChapter(
 
       // Generate embedding for search
       onProgress?.(pageNum, pdf.numPages, `Creating embedding...`);
-      const embedding = await generateEmbedding(analysis.embeddingText);
+      const embedding = await generateEmbedding(analysis.embeddingText, diagramImageBase64);
 
       // Create processed diagram object
       const diagramId = `${bookId}-ch${chapterIndex}-${detection.figureNumber.replace(/\./g, '_')}`;

@@ -1,5 +1,5 @@
 // Assuming we will use standard Web Speech API for the MVP prototype 
-// to avoid blocking the user with complex Cloud TTS auth for the hackathon,
+// to avoid blocking the user with complex Cloud TTS auth,
 // but structurally this service handles all TTS requests.
 // 
 // For a production app, this would wrap the Google Cloud Text-to-Speech API.

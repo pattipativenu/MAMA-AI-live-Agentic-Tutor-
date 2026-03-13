@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import 'katex/dist/katex.min.css';
-import { BlockMath } from 'react-katex';
+import { BlockMath, InlineMath } from 'react-katex';
 import { Volume2 } from 'lucide-react';
 
 interface WhiteboardStepProps {
@@ -65,29 +65,48 @@ export default function WhiteboardStep({
     return () => clearInterval(timer);
   }, [status, explanation]);
 
-  // Render explanation with orange highlighting for key terms
-  const renderExplanation = (text: string) => {
-    if (!highlightedTerms || highlightedTerms.length === 0) {
-      return text;
-    }
-
-    // Create a regex pattern that matches any of the highlighted terms
-    const pattern = new RegExp(`(${highlightedTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+  // Parse inline LaTeX math ($...$) and render with InlineMath
+  const renderExplanationWithMath = (text: string) => {
+    if (!text) return null;
     
-    const parts = text.split(pattern);
-    return parts.map((part, i) => {
-      const isHighlighted = highlightedTerms.some(term => 
-        part.toLowerCase() === term.toLowerCase()
-      );
-      
-      if (isHighlighted) {
-        return (
-          <span key={i} className="text-amber-600 font-semibold bg-amber-100/50 px-1 rounded">
-            {part}
-          </span>
-        );
+    // Split by inline math pattern $...$
+    // Pattern: $ followed by non-$ content, followed by $
+    const parts = text.split(/(\$[^$]+\$)/g);
+    
+    return parts.map((part, index) => {
+      // Check if this part is inline math (starts and ends with $)
+      if (part.startsWith('$') && part.endsWith('$') && part.length > 2) {
+        const mathContent = part.slice(1, -1); // Remove the $ markers
+        try {
+          return <InlineMath key={index} math={mathContent} />;
+        } catch (e) {
+          // If KaTeX fails to render, show the raw text
+          return <span key={index}>{part}</span>;
+        }
       }
-      return part;
+      
+      // Not math - apply highlighting if needed
+      if (highlightedTerms && highlightedTerms.length > 0) {
+        const pattern = new RegExp(`(${highlightedTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+        const subParts = part.split(pattern);
+        
+        return subParts.map((subPart, subIndex) => {
+          const isHighlighted = highlightedTerms.some(term => 
+            subPart.toLowerCase() === term.toLowerCase()
+          );
+          
+          if (isHighlighted) {
+            return (
+              <span key={`${index}-${subIndex}`} className="text-amber-600 font-semibold bg-amber-100/50 px-1 rounded">
+                {subPart}
+              </span>
+            );
+          }
+          return <span key={`${index}-${subIndex}`}>{subPart}</span>;
+        });
+      }
+      
+      return <span key={index}>{part}</span>;
     });
   };
 
@@ -132,17 +151,26 @@ export default function WhiteboardStep({
       </div>
 
       <div className="space-y-2">
-        {/* Math formula - shown only when complete to avoid partial KaTeX render errors */}
+        {/* Math formula - shown only when complete to avoid partial KaTeX render errors.
+             In white box, auto-scaled to fit without horizontal scrolling. */}
         {status === 'complete' && math && (
-          <div className="text-zinc-800 text-base overflow-x-auto transition-opacity duration-300 opacity-100 pb-1">
-            <BlockMath math={math} />
+          <div className="mt-2 bg-white rounded-lg border border-zinc-200 px-3 py-3 w-full">
+            <div className="flex justify-center overflow-hidden">
+              <div style={{ 
+                fontSize: 'clamp(0.75rem, 2.8vw, 1.05rem)',
+                maxWidth: '100%',
+                lineHeight: 1.4
+              }}>
+                <BlockMath math={math} />
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Explanation text - typewriter style with natural flow and orange highlighting */}
+        {/* Explanation text - with inline LaTeX math support and orange highlighting */}
         {explanation && (
           <p className="text-sm text-zinc-600 leading-relaxed">
-            {renderExplanation(status === 'typing' ? displayedExplanation : explanation)}
+            {renderExplanationWithMath(status === 'typing' ? displayedExplanation : explanation)}
             {status === 'typing' && displayedExplanation.length < explanation.length && (
               <span className="inline-block w-0.5 h-4 bg-amber-500 ml-0.5 animate-pulse align-middle" />
             )}

@@ -14,7 +14,7 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
   const navItems = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/study', label: 'Study', icon: BookOpen },
-    { path: '/sessions', label: 'Sessions', icon: Clock },
+    { path: '/sessions', label: 'My Notes', icon: Clock },
     { path: '/settings', label: 'Settings', icon: Settings },
   ];
 

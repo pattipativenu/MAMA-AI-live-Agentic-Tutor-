@@ -126,7 +126,6 @@ export async function storeMediaInCache(
     cacheKey,
     userId,
     topicName: normalizeTopicName(topicName),
-    chapterId,
     concept,
     mediaType,
     mediaUrl,
@@ -137,6 +136,11 @@ export async function storeMediaInCache(
     accessCount: 1,
     lastAccessedAt: Date.now()
   };
+  
+  // Only add chapterId if it's defined (Firestore rejects undefined values)
+  if (chapterId !== undefined && chapterId !== null) {
+    (cacheEntry as any).chapterId = chapterId;
+  }
   
   try {
     await setDoc(cacheRef, cacheEntry);

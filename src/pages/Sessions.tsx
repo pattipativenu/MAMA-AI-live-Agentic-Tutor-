@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  ArrowLeft, 
   Clock, 
   ChevronRight, 
   Image as ImageIcon, 
@@ -99,14 +98,14 @@ function DeleteConfirmModal({
   );
 }
 
+interface SessionCardProps {
+  session: SavedSession;
+  onDelete: (session: SavedSession) => void | Promise<void>;
+  key?: string;
+}
+
 // Session card component
-function SessionCard({ 
-  session, 
-  onDelete 
-}: { 
-  session: SavedSession; 
-  onDelete: (session: SavedSession) => void;
-}) {
+function SessionCard({ session, onDelete }: SessionCardProps) {
   const navigate = useNavigate();
   const [isHovered, setIsHovered] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -152,12 +151,9 @@ function SessionCard({
             </span>
           </div>
           
-          {/* Summary / Title - Clean, with markdown bold support */}
+          {/* Summary / Title - Clean */}
           <h3 className="text-base font-bold text-zinc-900 tracking-tight line-clamp-2 group-hover:text-amber-600 transition-colors">
-            <MarkdownText 
-              text={cleanSessionSummary(session.summary)} 
-              boldClassName="font-bold text-zinc-900"
-            />
+            {cleanSessionSummary(session.summary)}
           </h3>
           
           {/* Topic if available */}
@@ -252,23 +248,16 @@ export default function Sessions() {
   }, {} as Record<string, SavedSession[]>);
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#faf9f5] text-zinc-900">
+    <div className="flex flex-col h-full bg-[#faf9f5] text-zinc-900">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-zinc-200 px-4 py-4">
-        <div className="flex items-center justify-between max-w-2xl mx-auto">
-          <button 
-            onClick={() => navigate(-1)} 
-            className="p-2 bg-white border border-zinc-200 rounded-full hover:bg-zinc-50 transition-colors shadow-sm"
-          >
-            <ArrowLeft size={24} className="text-zinc-600" />
-          </button>
-          <h1 className="text-xl font-bold text-zinc-900">Session History</h1>
-          <div className="w-10" />
+      <header className="shrink-0 z-10 bg-white/80 backdrop-blur-md border-b border-zinc-200 px-4 py-4">
+        <div className="flex items-center justify-center max-w-2xl mx-auto">
+          <h1 className="text-xl font-bold text-zinc-900">My Study Notes</h1>
         </div>
       </header>
 
       {/* Sessions List */}
-      <main className="flex-1 p-4 pb-24">
+      <main className="flex-1 overflow-y-auto p-4 pb-24">
         <div className="max-w-2xl mx-auto space-y-6">
           {sessions.length === 0 ? (
             <div className="text-center bg-white border border-zinc-200 rounded-[32px] shadow-sm py-16 px-6 flex flex-col items-center mt-8">
@@ -287,7 +276,7 @@ export default function Sessions() {
               </button>
             </div>
           ) : (
-            Object.entries(groupedSessions).map(([groupName, groupSessions]) => (
+            (Object.entries(groupedSessions) as [string, SavedSession[]][]).map(([groupName, groupSessions]) => (
               <div key={groupName}>
                 <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3 px-1">
                   {groupName}

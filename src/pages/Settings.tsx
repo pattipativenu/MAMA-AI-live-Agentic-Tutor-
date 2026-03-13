@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, PlaySquare, Settings as SettingsIcon, Volume2, Play, AlertCircle } from 'lucide-react';
+import { User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, PlaySquare, Settings as SettingsIcon, Volume2, Play, AlertCircle } from 'lucide-react';
 import { UserProfile, GEMINI_VOICES, GeminiVoice } from '../hooks/useProfile';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc } from 'firebase/firestore';
@@ -176,12 +176,8 @@ export default function Settings() {
   return (
     <div className="flex flex-col min-h-dvh bg-[rgb(250,249,245)] text-zinc-900 px-0 pt-0 relative pb-24">
       <div className="bg-white border-b border-zinc-200 px-6 py-4 pt-6 sticky top-0 z-20 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <button onClick={() => navigate(-1)} className="p-2 border border-zinc-200 rounded-full hover:bg-zinc-50 transition-colors shrink-0">
-            <ArrowLeft size={20} className="text-zinc-600" />
-          </button>
+        <div className="flex items-center justify-center mb-6">
           <h1 className="text-xl font-bold tracking-tight px-4 text-center">Settings</h1>
-          <div className="w-10"></div>
         </div>
 
         {/* Custom Tab Selector */}

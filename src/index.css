@@ -18,3 +18,18 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* ── KaTeX overflow fix ─────────────────────────────────────────────────── */
+/* Force all KaTeX block-level renders (whiteboard) to fit within the mobile
+   viewport. Without this, .katex-display uses overflow: visible by default
+   which bypasses our wrapper's overflow-hidden and causes horizontal scroll. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+
+/* Also constrain inline KaTeX to never cause horizontal scroll */
+.katex {
+  max-width: 100%;
+}
