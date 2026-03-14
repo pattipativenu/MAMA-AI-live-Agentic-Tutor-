@@ -15,7 +15,7 @@
 [![Cloud Run](https://img.shields.io/badge/Cloud_Run-Deployed-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/run)
 [![Cloud Storage](https://img.shields.io/badge/Cloud_Storage-Media_Cache-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/storage)
 
-**☁️ Cloud Run URL**: [https://mama-ai-service-972465918951.us-central1.run.app](https://mama-ai-service-972465918951.us-central1.run.app) [<img src="./public/assets/Mama_logo.png" width="28" height="28" alt="Mama AI" style="vertical-align: middle; margin-left: 6px; border-radius: 4px;">](https://mama-ai-service-972465918951.us-central1.run.app)  
+**☁️ Cloud Run URL**: [https://mama-ai-service-972465918951.us-central1.run.app](https://mama-ai-service-972465918951.us-central1.run.app)  
 </div>
 
 ## 🌟 Overview
@@ -37,7 +37,7 @@ Traditional ed-tech forces students to type questions into a search box. Mama AI
 |----------|---------------|
 | **Challenge Category** | Live Agents 🗣️ (Audio/Vision) |
 | **Core Tech** | Gemini Live API + Gemini 3.1 Pro + Firebase + Cloud Run |
-| **Key Differentiator** | Textbook-grounded RAG with zero hallucination |
+| **Key Differentiator** | Textbook-grounded RAG for curriculum-aligned responses |
 | **Visual Generation** | Nano Banana 2 (images) + Veo 3.1 Fast (videos) |
 | **Learning Modes** | Lab → Tutor → Exam → Notes |
 | **Storage** | Firestore (data) + Cloud Storage (media) |
@@ -169,68 +169,70 @@ flowchart TB
 
 ## ✨ Core Features & Learning Modes
 
-### 🔬 Lab Mode — Learn by Doing
+### 🔬 Lab Mode — Hands-On Experiments
 
-> **TL;DR:** Hands-on experiments with real-time camera guidance using **`gemini-2.5-flash-native-audio-preview-12-2025`**. Safety-first approach with natural voice interruptions.
+**What it does:** Real-time camera-guided lab experiments with safety monitoring using **`gemini-2.5-flash-native-audio-preview-12-2025`** Live API.
 
-Lab Mode is where science comes alive. We built this specifically for students who learn best through hands-on experimentation. Instead of reading about chemical reactions, you *do* them—with Mama AI watching your every move through the camera.
-
-Here's how it works: Fire up Lab Mode, point your camera at your experiment setup, and start talking. Mama AI uses the **`gemini-2.5-flash-native-audio-preview-12-2025`** Live API to see your surroundings in real-time and hear your voice simultaneously. She'll identify the equipment you've laid out, walk you through each step of the procedure, and most importantly—she prioritizes **safety**. If you're about to mix the wrong chemicals or skip a crucial safety step, she'll interrupt immediately.
-
-The magic? It's completely conversational. Stuck on a step? Just ask. Want to try a different approach? Go for it. The Live API handles interruptions naturally, so you never feel like you're talking to a robot.
-
----
-
-### 📝 Exam Mode — Test Your Knowledge, Learn from Mistakes
-
-> **TL;DR:** Socratic tutoring with active recall. Uses **`gemini-3.1-pro-preview`** to weave your hobbies (football, cricket, gaming) into explanations. Never gives answers outright—guides you to discover them.
-
-Exam Mode isn't a scary test—it's your personal study buddy that helps you recap and retain what you've learned. The goal here isn't to grade you; it's to strengthen your understanding through active recall.
-
-Mama AI becomes your Socratic tutor. She questions you on the topic, but here's the twist: **she never gives you the answer outright.** Stuck on a physics problem about projectile motion? She won't just blurt out the formula. Instead, she'll ask: "What's your favorite sport? Football? Great—imagine kicking a ball. What direction does it go when you kick it at different angles?"
-
-She weaves your **favorite hobbies and activities** into every explanation. Cricket fan? She'll explain angular momentum using a spinning ball. Gamer? She'll draw parallels to game physics. This personalization happens through **`gemini-3.1-pro-preview`** (with **`gemini-3-pro-preview`** as fallback), which analyzes your responses and crafts follow-up questions that actually make you think.
-
-> **Note:** Exam Mode uses the same visual tools as Tutor Mode, like whiteboard, image generation, and video generation—so you get the full multimodal experience while studying.
+**How to Test:**
+1. Navigate to **Lab Mode** from the home screen
+2. Allow camera permissions when prompted
+3. Point camera at your experiment setup
+4. Speak naturally: "What equipment do I need?" or "Is this the correct procedure?"
+5. **Expected:** Mama AI identifies equipment, guides steps, and interrupts if safety issues detected
 
 ---
 
-### 📚 Tutor Mode — Your Textbook, Truly Understood
+### 📝 Exam Mode — Socratic Assessment
 
-> **TL;DR:** Zero-hallucination RAG. Upload your PDFs → parsed by **`gemini-3.1-pro-preview`** → embedded with **`gemini-embedding-2-preview`** → stored in Firestore. Answers strictly from your materials + generates custom visuals (Nano Banana 2 + Veo 3.1 Fast).
+**What it does:** Active recall tutoring that uses your hobbies (football, cricket, gaming) to explain concepts via **`gemini-3.1-pro-preview`**. Never gives direct answers—guides you to discover them.
 
-This is where Mama AI fundamentally differs from every other AI tutor out there.
+**How to Test:**
+1. Select **Exam Mode** → Choose a topic
+2. Answer Mama AI's questions verbally
+3. When stuck, observe how she uses your favorite hobby to explain
+4. **Example:** If you like football, she'll explain projectile motion using ball trajectories
+5. **Expected:** Personalized hints that lead you to the answer, not give it directly
 
-Generic LLMs hallucinate. They confidently tell you wrong information about your specific curriculum because they don't *know* your textbook. We fixed that.
-
-**Here's our approach:** You upload your actual study materials—PDFs, ePub textbooks, even a ZIP file of your entire semester's notes. Behind the scenes, **`gemini-3.1-pro-preview`** and **`gemini-3.1-flash-lite-preview`** parse every page, extract the table of contents, identify diagrams, and process the full text. Then **`gemini-embedding-2-preview`** kicks in, creating rich multimodal embeddings that combine the textbook text *and* visual diagrams. Everything gets stored in **Firestore**—textbook content, chapter structures, and diagram embeddings.
-
-The result? When you ask a question, Mama AI answers **strictly from your uploaded materials**. No hallucinations. No generic internet answers. Just grounded, curriculum-specific responses.
-
-But we didn't stop there. When concepts get complex, Mama AI automatically generates:
-
-**🎨 Custom Diagrams with Nano Banana 2**  
-Using **`gemini-3.1-flash-image-preview`** (falling back to **`gemini-3-pro-image-preview`**), she creates bespoke 9:16 portrait images tailored to your learning context. Explaining electric fields? She'll generate a visualization using analogies from *your* favorite theme—space, anime, realistic, whatever you picked in your profile.
-
-**🎬 Concept Animations with Veo 3.1 Fast**  
-For dynamic processes like osmosis or planetary motion, she triggers **`veo-3.1-fast-generate-preview`** to create silent 8-second videos. These aren't generic stock animations—they're generated specifically for the concept you're struggling with, in the visual style you prefer.
-
-**✍️ The Interactive Whiteboard**  
-When math gets multi-step, the whiteboard appears. Mama AI doesn't just display formulas—she builds them line by line using proper **LaTeX** rendering. She'll write out Step 1, pause for your confirmation, then proceed to Step 2. It's like having a patient tutor standing next to you at the chalkboard, checking your understanding at every stage.
-
-All generated media (images, videos, whiteboard sessions) gets cached in **Firebase Cloud Storage** so you can revisit it anytime in your study notes.
+> **Note:** Uses same whiteboard, image generation, and video generation as Tutor Mode
 
 ---
 
-### 📝 My Study Notes — Your Complete Learning History
+### 📚 Tutor Mode — Textbook-Grounded Learning
 
-> **TL;DR:** Every session auto-saved. Uses **`gemini-3.1-pro-preview`** to synthesize conversations, whiteboards, and mistakes into structured study guides with key concepts, formulas & revision tips.
+**What it does:** Textbook-grounded RAG system. Upload PDFs → parsed by **`gemini-3.1-pro-preview`** → embedded with **`gemini-embedding-2-preview`** → stored in Firestore. Answers strictly from your uploaded materials, not generic internet sources.
 
-Every conversation, every whiteboard session, every generated image and video—it's all saved automatically. 
+**How to Test:**
+1. Go to **Study** → Upload a PDF textbook
+2. Wait for parsing (Gemini extracts TOC and diagrams)
+3. Select a chapter → Start voice session
+4. Ask: "Explain [topic from your textbook]"
+5. **Expected:** Answers reference specific pages/sections from YOUR uploaded PDF, not generic internet knowledge
 
-Head to "My Study Notes" and you'll find a complete timeline of your learning journey. But here's where it gets smart: Mama AI doesn't just dump raw transcripts on you. She uses **`gemini-3.1-pro-preview`** to synthesize everything—your conversation history, whiteboard steps, key concepts covered, even your mistakes—into a beautifully formatted study guide.
+**Visual Tools Auto-Generated:**
+| Tool | Trigger | Model Used |
+|------|---------|------------|
+| **Custom Diagrams** | Complex concepts | `gemini-3.1-flash-image-preview` (Nano Banana 2) |
+| **Concept Animations** | Dynamic processes (osmosis, motion) | `veo-3.1-fast-generate-preview` |
+| **Interactive Whiteboard** | Multi-step math problems | LaTeX rendering with step-by-step walkthrough |
 
-The model ingests the full session context, identifies the core learning objectives, and generates structured notes with key concepts, formula breakdowns, definitions, and personalized revision tips. It's like having a personal note-taker who actually understands what you learned and why it matters.
+All media cached in **Firebase Cloud Storage** for later review.
+
+---
+
+### 📝 My Study Notes — Session History
+
+**What it does:** Auto-saves every session. Uses **`gemini-3.1-pro-preview`** to synthesize conversations, whiteboards, and mistakes into structured study guides.
+
+**How to Test:**
+1. Complete any voice session (Lab/Exam/Tutor)
+2. Navigate to **My Notes** from bottom navigation
+3. Select the session you just completed
+4. **Expected:** Structured summary with:
+   - Key concepts covered
+   - Formulas explained
+   - Whiteboard steps preserved
+   - Generated images/videos accessible
+   - Personalized revision tips
 
 ## 🤖 AI Models & Technologies
 
@@ -335,47 +337,176 @@ mama-ai/
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Getting Started (Reproducible Setup Guide)
+
+> **📋 Judge Note:** This section provides **step-by-step reproducible instructions** for setting up and running Mama AI locally. Follow these steps exactly to recreate the project environment.
 
 ### Prerequisites
-- Node.js 18+
-- npm or yarn
-- Google Cloud account with billing enabled
-- Firebase project
 
-### 1. Clone & Install
+Before starting, ensure you have:
+
+| Requirement | Version | How to Verify |
+|-------------|---------|---------------|
+| **Node.js** | 18+ | `node --version` |
+| **npm** | 9+ | `npm --version` |
+| **Google Account** | Any | Required for Firebase & Gemini API |
+| **Git** | Any | `git --version` |
+
+**Required Services:**
+- [Google Cloud account](https://cloud.google.com/free) (free tier works)
+- [Firebase project](https://console.firebase.google.com/)
+- [Gemini API key](https://ai.google.dev/)
+
+---
+
+### Step 1: Clone & Install
+
 ```bash
+# Clone the repository
 git clone https://github.com/yourusername/mama-ai.git
+
+# Navigate to project folder
 cd mama-ai
+
+# Install dependencies
 npm install
 ```
 
-### 2. Environment Setup
-Copy `.env.example` to `.env.local` and fill in your values:
+**Expected output:** `added XXX packages in XXs`
 
-```env
-# Firebase Configuration
-VITE_FIREBASE_API_KEY=your_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
+---
 
-# Gemini API
-VITE_GEMINI_API_KEY=your_gemini_api_key
+### Step 2: Configure Environment Variables
+
+```bash
+# Copy the example environment file
+cp .env.example .env.local
+
+# Edit with your credentials
+nano .env.local  # or use any text editor
 ```
 
-### 3. Run Locally
+**Fill in these required values:**
+
+```env
+# ==========================================
+# Google Gemini API (Required for AI features)
+# Get key at: https://ai.google.dev/
+# ==========================================
+VITE_GEMINI_API_KEY=your_gemini_api_key_here
+
+# ==========================================
+# Firebase Configuration (Required for backend)
+# Get these from: https://console.firebase.google.com/project/_/settings/general/web
+# ==========================================
+VITE_FIREBASE_API_KEY=your_firebase_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
+```
+
+---
+
+### Step 3: Run the Development Server
+
 ```bash
 npm run dev
 ```
-App will be available at `http://localhost:5173`
 
-### 4. Build for Production
+**Expected output:**
+```
+  VITE v5.x.x  ready in XXX ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+```
+
+**Open your browser:** Navigate to `http://localhost:5173`
+
+---
+
+### Step 4: Test Core Features Locally
+
+Once the app is running, test these key features:
+
+| Feature | How to Test | Expected Result |
+|---------|-------------|-----------------|
+| **Sign Up** | Create account with email | Account created in Firebase Auth |
+| **Upload Textbook** | Go to Study → Upload PDF | PDF appears in library |
+| **Voice Mode** | Start Tutor Mode → Click mic | Browser requests mic permission |
+| **Image Generation** | Ask "Explain photosynthesis" | Image generates (~5-10s) |
+| **Video Generation** | Ask "Show me osmosis" | Video job created, plays when ready |
+
+---
+
+### Step 5: Build for Production
+
 ```bash
+# Create optimized production build
+npm run build
+
+# Output will be in /dist folder
+ls -la dist/
+```
+
+**Expected:** `dist/` folder contains `index.html` and assets
+
+---
+
+## 🧪 Testing & Verification Checklist
+
+> **📋 For Judges:** Use this checklist to verify the project runs correctly.
+
+### Local Development Tests
+
+```bash
+# Run linter (should pass with no errors)
+npm run lint
+
+# Type check (should pass)
+npx tsc --noEmit
+
+# Build test (should complete without errors)
 npm run build
 ```
+
+### Feature Verification Tests
+
+| Test | Steps | Success Criteria |
+|------|-------|------------------|
+| **✅ Gemini API Connection** | Start voice mode, speak "Hello" | AI responds with audio |
+| **✅ Textbook Upload** | Upload a PDF, wait for parsing | TOC appears, chapters listed |
+| **✅ Grounded Answers** | Ask question about uploaded chapter | Answer references textbook content |
+| **✅ Image Generation** | Request diagram | 9:16 portrait image appears |
+| **✅ Video Generation** | Request animation | 8-second video generates & plays |
+| **✅ Whiteboard** | Ask math problem | LaTeX formulas render step-by-step |
+| **✅ Session Persistence** | End session, go to My Notes | Session appears with summary |
+
+### API Key Verification
+
+If you encounter errors, verify your API keys:
+
+```bash
+# Test Gemini API key
+curl "https://generativelanguage.googleapis.com/v1beta/models?key=YOUR_GEMINI_API_KEY"
+
+# Should return list of available models
+```
+
+---
+
+## 🔧 Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `MODULE_NOT_FOUND` | Run `npm install` again |
+| `Invalid API Key` | Check `.env.local` for typos |
+| `Firebase permission denied` | Enable Firestore and Auth in Firebase Console |
+| `Mic not working` | Use HTTPS (deployed) or `localhost` |
+| `Build fails` | Ensure Node.js 18+: `node --version` |
 
 ---
 
