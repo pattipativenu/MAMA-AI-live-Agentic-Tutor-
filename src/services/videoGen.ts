@@ -81,33 +81,16 @@ function buildVideoPrompt(concept: string, age: string = '', theme: string = 're
     return `
 An 8-second COMPLETELY SILENT educational animation demonstrating: "${concept}" for a ${subject} class.
 
-TIMING STRUCTURE (CRITICAL):
-• 0–3 seconds: SETUP PHASE
-  - Instantly establish all diagram elements (objects, rays, dimensions, labels, axes)
-  - All components must be visible and positioned by 3-second mark
-  - Minimal movement - just assembly/appearance of elements
+CINEMATIC DIRECTION (CRITICAL):
+• FRAME 1 (IMMEDIATE VISIBILITY): From the very first millisecond, the ENTIRE diagram must be fully rendered. All elements, objects, rays, dimensions, labels, and axes are already present and perfectly visible. Do NOT 'assemble', 'draw in', or 'fade in' elements over time. Start the video with the complete scene already established.
+• MOTION & ACTION: The core phenomenon (${concept}) is actively occurring throughout the 8 seconds. Show continuous, clear relationships through motion (e.g., energy transferring, particles colliding, waves propagating) happening within the fully established diagram.
+• SHOT COMPOSITION: Clean, minimal abstract textbook diagram. Professional academic visualization. Static camera or very slow, steady dolly shot. No zooming or panning to reveal things (everything is already in frame).
 
-• 3–5 seconds: EXPLANATION PHASE
-  - Animate the core concept (arrows moving, rays propagating, forces acting, etc.)
-  - Show relationships through motion (energy transfer, wave propagation, particle collision)
-  - Write/reveal key equations or formulas if needed
-  - By 5 seconds, ALL content must be fully rendered
-
-• 5–8 seconds: COMPLETION PHASE
-  - Video should be essentially finished by 5 seconds
-  - Use 5-8s only for gentle camera pull-back or final emphasis
-  - NO new content introduced after 5 seconds
-  - Clean completion with full diagram visible
-
-SHOT COMPOSITION: Clean, minimal abstract textbook diagram. Professional academic visualization.
-
-SUBJECT DETAILS: Pure theoretical diagram showing the concept with labeled parts, arrows, and annotations exactly as it appears in a science textbook. ${audienceNote}
-
-SETTING: Clean, minimal academic background - neutral gradient or subtle grid. Professional educational aesthetic.
-
+SUBJECT DETAILS: THIS IS THE MOST IMPORTANT PART. The visual content must be unambiguously strong, deeply informative, and perfectly structure the core scientific principles of "${concept}". It is not just an illustration; it is a rigorous theoretical diagram showing the concept intricately with perfectly labeled parts, arrows, and scientific annotations. What the student sees must fundamentally explain how "${concept}" actually works. ${audienceNote}
+SETTING: Clean, minimal academic background - neutral gradient or subtle grid.
 AESTHETICS: ${aesthetic}
 
-CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. Pure silent visual diagram animation only.
+CRITICAL RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. Pure silent visual diagram animation only.
     `.trim();
   }
 
@@ -116,32 +99,16 @@ CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No 
     return `
 An 8-second COMPLETELY SILENT educational animation demonstrating: "${concept}" for a ${subject} class.
 
-TIMING STRUCTURE (CRITICAL):
-• 0–3 seconds: SETUP PHASE
-  - Instantly establish the real-world scene (all objects, environment, lighting)
-  - All elements must be visible and positioned by 3-second mark
-  - Camera positioned, scene fully set
+CINEMATIC DIRECTION (CRITICAL):
+• FRAME 1 (IMMEDIATE VISIBILITY): From the very first millisecond, the ENTIRE real-world scene must be fully established and completely visible. Do NOT 'build', 'gather', or fade elements in over time. The environment, lighting, and all subject objects are perfectly present on frame 1.
+• MOTION & ACTION: The core physical phenomenon (${concept}) is actively happening. Show clear, continuous natural motion (e.g., water flowing, objects falling, chemical reactions occurring) in real-time within the fully established scene.
+• SHOT COMPOSITION: Highly relatable, tangible REAL-WORLD example of ${concept} in everyday life. Locked-off camera or cinematic slow tracking shot.
 
-• 3–5 seconds: EXPLANATION PHASE
-  - The concept happens (water flowing, ball falling, reaction occurring, etc.)
-  - Core phenomenon clearly demonstrated through natural motion
-  - By 5 seconds, ALL action must be complete
-
-• 5–8 seconds: COMPLETION PHASE
-  - Phenomenon essentially finished by 5 seconds
-  - Use 5-8s only for aftermath or camera movement to emphasize result
-  - NO new action after 5 seconds
-  - Clean ending showing outcome
-
-SHOT COMPOSITION: Highly relatable, tangible REAL-WORLD example of ${concept} in everyday life.
-
-SUBJECT DETAILS: Photorealistic real-world scenario where ${concept} naturally occurs. Every detail scientifically accurate. ${audienceNote}
-
+SUBJECT DETAILS: THIS IS THE MOST IMPORTANT PART. The visual content must be unambiguously strong, deeply informative, and present a photorealistic, tangible real-world scenario where "${concept}" naturally and powerfully occurs. Do not be vague or generic. Every physical detail must be scientifically and proportionally accurate, visually explaining the exact principles of "${concept}" through a strong, robust re-enactment of the phenomena. ${audienceNote}
 SETTING: Familiar real-world environment where students would encounter this concept.
-
 AESTHETICS: ${aesthetic}
 
-CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. Pure silent visual demonstration only.
+CRITICAL RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. Pure silent visual demonstration only.
     `.trim();
   }
 
@@ -149,30 +116,14 @@ CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No 
   return `
 An 8-second COMPLETELY SILENT educational animation demonstrating: "${concept}" for a ${subject} class.
 
-TIMING STRUCTURE (CRITICAL):
-• 0–3 seconds: SETUP & REAL-WORLD PHASE
-  - Instantly establish real-world example (objects, environment, all elements visible)
-  - Show the concept in action in physical form
-  - All real-world elements fully rendered by 3-second mark
+CINEMATIC DIRECTION (CRITICAL):
+• FRAME 1 (IMMEDIATE VISIBILITY): From the very first millisecond, the highly relatable, tangible REAL-WORLD example of ${concept} must be fully established and completely visible. No fading in or building scene elements.
+• SECONDS 0-4 (REAL-WORLD ACTION): The concept happens in physical form, clearly demonstrating the phenomena in a photorealistic environment.
+• SECONDS 4-8 (MORPHING TRANSFORMATION): The real-world scene actively and smoothly morphs and transforms into a clean, abstract textbook diagram with labels and theoretical arrows to explain the underlying science. The transformation itself is the visual focus, ending with a fully formed diagram.
+• SHOT COMPOSITION: Static, locked-off camera focusing entirely on the subject and the morphing transition.
 
-• 3–5 seconds: TRANSFORMATION PHASE
-  - Real-world objects smoothly morph into abstract diagram
-  - Transformation must be COMPLETE by 5-second mark
-  - Motion blur, glow lines tracking the morphing process
-  - By 5 seconds, diagram must be fully formed with all labels, arrows, equations
-
-• 5–8 seconds: COMPLETION PHASE
-  - Diagram transformation essentially finished by 5 seconds
-  - Use 5-8s only for gentle camera pull-back or final emphasis
-  - NO new transformations or content after 5 seconds
-  - Clean ending showing complete theoretical diagram
-
-SHOT COMPOSITION: Opens with highly relatable, tangible REAL-WORLD example, transitions to abstract textbook diagram.
-
-SUBJECT DETAILS: The subject matter (${subject}) must be scientifically and theoretically accurate. Every element visually distinct. ${audienceNote}
-
-SETTING: Starts grounded real-world, then transitions into a clean, minimal abstract environment.
-
+SUBJECT DETAILS: THIS IS THE MOST IMPORTANT PART. The visual content must be unambiguously strong, deeply informative, and rigorously detailed. The subject matter (${subject}) must be scientifically and theoretically accurate in both its highly detailed real-world physical form, AND its subsequent perfectly labeled, mathematically accurate abstract diagram form. Every element must be visually striking and purposefully explain the core science behind "${concept}". ${audienceNote}
+SETTING: Starts grounded real-world, then transitions into a clean, minimal abstract academic environment.
 AESTHETICS: ${aesthetic}
 
 CRITICAL AUDIO RULE: Absolutely NO AUDIO TRACK WHATSOEVER. No sound effects. No background music. No ambient noise. No dialogue. No voiceover. No text overlays. No captions. Silent visual animation only.
