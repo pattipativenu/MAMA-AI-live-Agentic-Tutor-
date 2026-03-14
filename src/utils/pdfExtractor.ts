@@ -1,10 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Point the worker at the bundled worker file
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url
-).toString();
+// Point the worker at the CDN to avoid Vite/Cloud Run .mjs MIME type issues in production
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 /**
  * Extracts all text from a PDF File object.

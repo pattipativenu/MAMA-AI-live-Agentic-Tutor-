@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, ChangeEvent, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Camera, X, ArrowLeft, Mic, MicOff, Loader2, Send, Zap, BookOpen, Sparkles, ChevronLeft, ChevronRight, Image as ImageIcon, Volume2, Play, Pause, Video, VideoOff } from 'lucide-react';
+import { Camera, X, ArrowLeft, Mic, MicOff, Loader2, Send, Zap, BookOpen, Sparkles, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Image as ImageIcon, Volume2, Play, Pause, Video, VideoOff } from 'lucide-react';
 import { useTextbookParser, TextbookChapter } from '../../hooks/useTextbookParser';
 import { useProfile } from '../../hooks/useProfile';
 import { useAuth } from '../../contexts/AuthContext';
@@ -825,6 +825,18 @@ ${answersContent}
       </if_block>
     </conditional_responses>
   </practice_philosophy>
+  </practice_philosophy>
+
+  <patient_turn_taking>
+    CRITICAL RULE FOR ALL MODES: 
+    Whenever you ask a question or prompt the student, you MUST IMMEDIATELY fall silent and enter a dormant state.
+    - NEVER answer your own question.
+    - NEVER say "You might be wondering..." as a follow-up.
+    - NEVER say "That's right!" or auto-confirm before the student has actually spoken.
+    - You must WAIT indefinitely until raw audio input is received from the user.
+    - Do not acknowledge silence. Just wait.
+  </patient_turn_taking>
+
   ${pastSessionContext || ''}
 </system_instruction>`.trim();
     }, [chapterContent, answersContent, chapterMetadata, profile, pastSessionContext]);
@@ -896,6 +908,7 @@ ${answersContent}
     // Live camera streaming state (like Lab mode)
     const [isVideoActive, setIsVideoActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
+    const [isGalleryCollapsed, setIsGalleryCollapsed] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
 
@@ -1280,39 +1293,50 @@ ${answersContent}
 
                 {/* Media Gallery Bar - Above Bottom Controls */}
                 {generatedMedia.length > 0 && (
-                    <div ref={mediaGalleryRef} className="bg-white border-t border-zinc-200 px-4 py-3 z-20">
-                        <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide pb-1">
+                    <div ref={mediaGalleryRef} className="bg-white border-t border-zinc-200 px-4 py-2 z-20 transition-all duration-300">
+                        <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider shrink-0 bg-zinc-100 px-2 py-1 rounded-lg">
                                 Generated ({generatedMedia.length})
                             </span>
-                            {generatedMedia.map((media, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => setSelectedMedia(media)}
-                                    className={`shrink-0 relative rounded-xl overflow-hidden border-2 transition-all ${
-                                        selectedMedia?.url === media.url 
-                                            ? 'border-amber-500 ring-2 ring-amber-200' 
-                                            : 'border-zinc-200 hover:border-amber-300'
-                                    }`}
-                                    style={{ width: '56px', height: '56px' }}
-                                >
-                                    {media.type === 'image' ? (
-                                        <img 
-                                            src={media.url} 
-                                            alt={`Generated ${idx + 1}`}
-                                            className="w-full h-full object-cover"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
-                                            <Play size={16} className="text-white" />
-                                        </div>
-                                    )}
-                                    {selectedMedia?.url === media.url && (
-                                        <div className="absolute inset-0 bg-amber-500/20" />
-                                    )}
-                                </button>
-                            ))}
+                            <button
+                                onClick={() => setIsGalleryCollapsed(!isGalleryCollapsed)}
+                                className="p-1 rounded-full hover:bg-zinc-100 text-zinc-500 transition-colors"
+                            >
+                                {isGalleryCollapsed ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                            </button>
                         </div>
+                        
+                        {!isGalleryCollapsed && (
+                            <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide pb-1">
+                                {generatedMedia.map((media, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => setSelectedMedia(media)}
+                                        className={`shrink-0 relative rounded-xl overflow-hidden border-2 transition-all ${
+                                            selectedMedia?.url === media.url 
+                                                ? 'border-amber-500 ring-2 ring-amber-200' 
+                                                : 'border-zinc-200 hover:border-amber-300'
+                                        }`}
+                                        style={{ width: '56px', height: '56px' }}
+                                    >
+                                        {media.type === 'image' ? (
+                                            <img 
+                                                src={media.url} 
+                                                alt={`Generated ${idx + 1}`}
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                                                <Play size={16} className="text-white" />
+                                            </div>
+                                        )}
+                                        {selectedMedia?.url === media.url && (
+                                            <div className="absolute inset-0 bg-amber-500/20" />
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 

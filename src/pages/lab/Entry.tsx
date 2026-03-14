@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Mic, MicOff, X, Video, VideoOff, Image as ImageIcon, Loader2, ChevronLeft } from 'lucide-react';
-import { useGeminiLive } from '../../hooks/useGeminiLive';
+import { Mic, MicOff, X, Video, VideoOff, Image as ImageIcon, Loader2, ChevronLeft, ChevronUp, ChevronDown } from 'lucide-react';
+import { useGeminiLive, type GeneratedMedia } from '../../hooks/useGeminiLive';
 import { WhiteboardView } from '../../components/whiteboard';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
 import { useSessions, SessionMessage, SavedSession } from '../../hooks/useSessions';
@@ -227,9 +227,17 @@ NEVER dump multiple steps at once — ONE step, ONE observation, ONE explanation
 
 </tools>
 
-<opening>
-Start with a warm, excited greeting and ask: "What experiment would you like to do today, ${firstName}?"
 </opening>
+
+  <patient_turn_taking>
+    CRITICAL RULE FOR ALL MODES: 
+    Whenever you ask a question or prompt the student, you MUST IMMEDIATELY fall silent and enter a dormant state.
+    - NEVER answer your own question.
+    - NEVER say "You might be wondering..." as a follow-up.
+    - NEVER say "That's right!" or auto-confirm before the student has actually spoken.
+    - You must WAIT indefinitely until raw audio input is received from the user.
+    - Do not acknowledge silence. Just wait.
+  </patient_turn_taking>
 
 </system_instruction>`.trim();
 };
@@ -249,6 +257,8 @@ export default function LabEntry() {
   const [isVideoActive, setIsVideoActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<GeneratedMedia | null>(null);
+  const [isGalleryCollapsed, setIsGalleryCollapsed] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -503,8 +513,8 @@ Then wait for the user to respond before continuing.`;
   };
 
   return (
-    <ErrorBoundary>
-    <div className="flex flex-col h-screen bg-[rgb(250,249,245)] text-zinc-900 overflow-hidden relative">
+    <ErrorBoundary children={
+      <div className="flex flex-col h-screen bg-[rgb(250,249,245)] text-zinc-900 overflow-hidden relative">
       
       {/* Error Display */}
       {error && (
@@ -633,6 +643,47 @@ Then wait for the user to respond before continuing.`;
         )}
       </main>
 
+      {/* Media gallery strip */}
+      {generatedMedia.length > 0 && (
+        <div className="bg-white border-t border-zinc-200 px-4 py-2 z-20 transition-all duration-300">
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider shrink-0 bg-zinc-100 px-2 py-1 rounded-lg">
+              Generated ({generatedMedia.length})
+            </span>
+            <button
+              onClick={() => setIsGalleryCollapsed(!isGalleryCollapsed)}
+              className="p-1 rounded-full hover:bg-zinc-100 text-zinc-500 transition-colors"
+            >
+              {isGalleryCollapsed ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+            </button>
+          </div>
+          
+          {!isGalleryCollapsed && (
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+              {generatedMedia.map((media, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setSelectedMedia(media)}
+                  className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                    selectedMedia?.url === media.url 
+                      ? 'border-amber-400 ring-2 ring-amber-400/30' 
+                      : 'border-zinc-200 hover:border-zinc-300'
+                  }`}
+                >
+                  {media.type === 'image' ? (
+                    <img src={media.url} alt={`Generated ${idx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                      <span className="text-white text-xs">▶</span>
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bottom Control Bar */}
       <div className="bg-white border-t border-zinc-200 p-6 pb-8 z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
         <div className="flex items-center justify-between max-w-md mx-auto">
@@ -678,6 +729,6 @@ Then wait for the user to respond before continuing.`;
         </div>
       </div>
     </div>
-    </ErrorBoundary>
+      } />
   );
 }
