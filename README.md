@@ -98,36 +98,36 @@ flowchart TB
     User --> |Interacts| UI
 
     %% Client Operations
-    UI <--> LiveHook
-    AudioVideoIO <--> |Raw PCM Audio / Video Frames| LiveHook
+    UI -.-> |Manages| LiveHook
+    AudioVideoIO -.-> |Raw PCM Audio / Video Frames| LiveHook
     Whiteboard -.-> |State updates from AI| UI
     MediaGallery -.-> |Fetches Gen-Media| UI
 
     %% Live Connection
-    LiveHook <==> |Bidirectional WebSockets| LiveModel
+    LiveHook === |Bidirectional WebSockets| === LiveModel
 
     %% Live Tool Executions
-    LiveModel --> |Function Call: generate_image| ImgModel
-    LiveModel --> |Function Call: generate_video| VidModel
-    LiveModel --> |Function Call: add_whiteboard_step| Whiteboard
+    LiveModel -.-> |Function Call: generate_image| ImgModel
+    LiveModel -.-> |Function Call: generate_video| VidModel
+    LiveModel -.-> |Function Call: add_whiteboard_step| Whiteboard
 
     %% Processing & Storage
     LiveModel -.-> |Saves Session Transcripts| Firestore
-    ImgModel --> |Saves generated PNGs| Storage
-    VidModel --> |Saves generated MP4s| Storage
-    ReasoningModel --> |Reads transcripts, Writes Notes| Firestore
+    ImgModel -.-> |Saves generated PNGs| Storage
+    VidModel -.-> |Saves generated MP4s| Storage
+    ReasoningModel -.-> |Reads transcripts, Writes Notes| Firestore
 
     %% RAG Pipeline Flow
-    User --> |Uploads ZIP/PDF/EPUB| PDFExtract
-    PDFExtract --> |Sends Raw Text| ParseModel
-    PDFExtract --> |Sends Diagrams| EmbedModel
-    ParseModel --> |Saves structured chapters| Firestore
-    EmbedModel --> |Saves diagram metadata| Storage 
+    User -.-> |Uploads ZIP/PDF/EPUB| PDFExtract
+    PDFExtract -.-> |Sends Raw Text| ParseModel
+    PDFExtract -.-> |Sends Diagrams| EmbedModel
+    ParseModel -.-> |Saves structured chapters| Firestore
+    EmbedModel -.-> |Saves diagram metadata| Storage 
 
     %% Backend integrations
-    UI --> |Authenticates| Auth
-    UI --> |Loads historical sessions| Firestore
-    UI --> |Served by| CloudRun
+    UI -.-> |Authenticates| Auth
+    UI -.-> |Loads historical sessions| Firestore
+    UI -.-> |Served by| CloudRun
 
     %% Styling Elements
     classDef client fill:#e3f2fd,stroke:#42a5f5,stroke-width:2px,color:#0b3b60,font-weight:bold
