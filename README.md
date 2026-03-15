@@ -63,6 +63,12 @@ flowchart TB
         AudioVideoIO["🎤 Mic / 📷 Camera / 🔊 Speaker\nWebRTC & MediaDevices API"]
         Whiteboard["✍️ Interactive Whiteboard\nRendered via LaTeX"]
         MediaGallery["🖼️ Media Gallery\nDisplays Gen-AI Assets"]
+        
+        subgraph LearningModes["🎓 Learning Modes"]
+            Lab["🔬 Lab Mode"]
+            Exam["📝 Exam Mode"] 
+            Tutor["📚 Tutor Mode"]
+        end
     end
 
     %% -- REAL-TIME CORE --
@@ -94,11 +100,12 @@ flowchart TB
     end
 
     %% -- RELATIONSHIPS & DATA FLOW --
-    User(("👩‍🎓 Student")) <--> |Speaks / Shows / Listens| AudioVideoIO
-    User --> |Interacts| UI
+    User(("👩‍🎓 Student")) -.-> |Speaks / Shows / Listens| AudioVideoIO
+    User -.-> |Interacts| UI
 
     %% Client Operations
-    UI -.-> |Manages| LiveHook
+    UI -.-> |Navigates| LearningModes
+    LearningModes -.-> |Selects Mode| LiveHook
     AudioVideoIO -.-> |Raw PCM Audio / Video Frames| LiveHook
     Whiteboard -.-> |State updates from AI| UI
     MediaGallery -.-> |Fetches Gen-Media| UI
@@ -113,8 +120,10 @@ flowchart TB
 
     %% Processing & Storage
     LiveModel -.-> |Saves Session Transcripts| Firestore
-    ImgModel -.-> |Saves generated PNGs| Storage
-    VidModel -.-> |Saves generated MP4s| Storage
+    ImgModel -.-> |Saves PNGs| Storage
+    VidModel -.-> |Saves MP4s| Storage
+    VidModel -.-> |Creates Job Tracker| Firestore
+    Firestore -.-> |UI Polls Job Status| UI
     ReasoningModel -.-> |Reads transcripts, Writes Notes| Firestore
 
     %% RAG Pipeline Flow
@@ -122,7 +131,7 @@ flowchart TB
     PDFExtract -.-> |Sends Raw Text| ParseModel
     PDFExtract -.-> |Sends Diagrams| EmbedModel
     ParseModel -.-> |Saves structured chapters| Firestore
-    EmbedModel -.-> |Saves diagram metadata| Storage 
+    EmbedModel -.-> |Saves diagram metadata| Storage
 
     %% Backend integrations
     UI -.-> |Authenticates| Auth
