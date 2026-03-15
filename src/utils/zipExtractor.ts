@@ -226,7 +226,12 @@ function extractTocChapters(rawText: string): Array<{ num: number; title: string
         
         // Skip if title is literally just the word "Chapter" or "Unit", which happens when
         // the regex accidentally matches a page number (e.g. "17 Chapter 2").
-        if (/^(?:chapter|unit)$/i.test(titleRaw)) continue;
+        // We use \b boundary to also skip text that starts with Chapter like "Chapter Four Moving Charges and Magnetism"
+        // which has its own match via the other regex.
+        if (/^(?:chapter|unit)\b/i.test(titleRaw)) continue;
+        
+        // General sanity check: Skip if chapter number is unreasonably high (likely a page number parsed incorrectly)
+        if (num > 40) continue;
         
         // Skip common non-chapter entries
         const lowerTitle = titleRaw.toLowerCase();

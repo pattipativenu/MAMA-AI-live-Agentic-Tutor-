@@ -121,6 +121,8 @@ ${truncated}`
 4. Detect the language (e.g., "English", "Spanish", "Hindi").
 5. For the textbook title, use the filename hint: "${fileName}".
 
+IMPORTANT: Evaluate the text carefully. DO NOT hallucinate chapters. ONLY extract chapters whose FULL text body is clearly present in the document. Do NOT create duplicate chapters or infer chapters purely from the Table of Contents or Bibliographies if their content is missing. If the document is only a single chapter, your chapters array MUST contain exactly ONE item.
+
 Return ONLY valid JSON with no extra text:
 {
   "title": "string",
