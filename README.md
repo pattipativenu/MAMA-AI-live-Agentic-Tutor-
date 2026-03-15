@@ -22,10 +22,10 @@
 
 Mama AI is a **voice-first, multimodal AI tutor** that transforms how students learn STEM subjects. Built for the Google Gemini Live Agent Challenge, it goes far beyond traditional chatbots by offering:
 
-- 🎙️ **Natural Voice Conversations** - Talk to Mama AI like a human tutor using the Gemini Live API
+- 🎙️ **Natural Voice Conversations** - Talk to Mama AI like a human tutor using the Gemini Live API with `gemini-2.5-flash-native-audio-preview-12-2025` for all modes
 - 👁️ **Vision-Enabled Learning** - Show her your homework, diagrams, or experiments via camera
-- 🎨 **Dynamic Visual Generation** - Auto-generates custom diagrams (Nano Banana pro 2) and animations (Veo 3.1) on demand
-- 📚 **Textbook-Grounded RAG** - Upload your actual textbooks; Mama AI answers strictly from your materials
+- 🎨 **Dynamic Visual Generation** - Auto-generates custom diagrams (Nano Banana 2) and animations (Veo 3.1) on demand
+- 📚 **Textbook-Grounded Learning** - Upload your textbooks; text parsed by `gemini-3.1-flash-lite-preview` and stored by chapter hierarchy, diagrams extracted via `gemini-3.1-pro-preview` and embedded with `gemini-embedding-2-preview` for semantic search
 
 ### Why Mama AI?
 
@@ -199,7 +199,7 @@ flowchart TB
 
 ### 📝 Exam Mode — Socratic Assessment
 
-**What it does:** Active recall tutoring that uses your hobbies (football, cricket, gaming) to explain concepts via **`gemini-3.1-pro-preview`**. Never gives direct answers—guides you to discover them.
+**What it does:** Active recall tutoring using **`gemini-2.5-flash-native-audio-preview-12-2025`** (Live API) for real-time voice interaction. After session ends, **`gemini-3.1-pro-preview`** evaluates transcript to generate Socratic "hooks" (memory anchors) using student's hobbies (football, cricket, gaming). Never gives direct answers—guides you to discover them.
 
 **How to Test:**
 1. Select **Exam Mode** → Choose a topic
@@ -208,13 +208,13 @@ flowchart TB
 4. **Example:** If you like football, she'll explain projectile motion using ball trajectories
 5. **Expected:** Personalized hints that lead you to the answer, not give it directly
 
-> **Note:** Uses same whiteboard, image generation, and video generation as Tutor Mode
+> **Note:** Uses same whiteboard, image generation, and video generation as Tutor Mode. Post-session evaluation uses `gemini-3.1-pro-preview` to generate personalized learning hooks.
 
 ---
 
 ### 📚 Tutor Mode — Textbook-Grounded Learning
 
-**What it does:** Textbook-grounded RAG system. Upload PDFs → parsed by **`gemini-3.1-pro-preview`** → embedded with **`gemini-embedding-2-preview`** → stored in Firestore. Answers strictly from your uploaded materials, not generic internet sources.
+**What it does:** Textbook-grounded learning system. Upload PDFs → **text** parsed by **`gemini-3.1-flash-lite-preview`** → stored in Firestore by chapter hierarchy. **Diagrams** extracted via vision (`gemini-3.1-pro-preview`) → embedded with **`gemini-embedding-2-preview`** for semantic search. Tutor mode uses **`gemini-2.5-flash-native-audio-preview-12-2025`** for voice, with chapter content injected as context. Answers strictly from uploaded materials, not generic internet sources.
 
 **How to Test:**
 1. Go to **Study** → Upload a PDF textbook
@@ -271,15 +271,15 @@ Mama AI leverages a sophisticated multi-model architecture to deliver a seamless
 | `gemini-3-pro-preview` | **Fallback Reasoning** - Secondary model for reasoning tasks when 3.1 Pro is unavailable |
 | `gemini-3.1-flash-lite-preview` | **Fast Processing** - Lightweight text tasks like session heading generation and textbook structure parsing |
 
-### 🔍 Embeddings & RAG
+### 🔍 Embeddings & RAG (Diagrams Only)
 | Model | Purpose |
 |-------|---------|
-| `gemini-embedding-2-preview` | **Vector Embeddings** - Powers the multimodal RAG system by creating embeddings for textbook text and diagrams, enabling semantic search and contextual retrieval |
+| `gemini-embedding-2-preview` | **Vector Embeddings for Diagrams** - Creates embeddings for textbook diagrams only (not text), enabling semantic search across figures. Text chapters are retrieved by hierarchical structure (TOC) parsed by `gemini-3.1-flash-lite-preview`. |
 
 ### 🗣️ Voice Interaction (Live API)
 | Model | Purpose |
 |-------|---------|
-| `gemini-2.5-flash-native-audio-preview-12-2025` | **Live Voice & Vision** - Enables real-time, bidirectional voice conversations with native audio output and vision capabilities for camera input |
+| `gemini-2.5-flash-native-audio-preview-12-2025` | **All Modes** - Real-time voice + vision. Lab mode includes Google Search tool. Tutor mode injects chapter context. Exam mode uses post-session `gemini-3.1-pro-preview` evaluation for hooks.
 
 ---
 
@@ -307,11 +307,13 @@ Mama AI leverages a sophisticated multi-model architecture to deliver a seamless
 | Technology | Purpose |
 |------------|---------|
 | **Google GenAI SDK** | Unified interface for all Gemini models |
-| **Gemini Live API** | Real-time bidirectional voice + vision |
-| **Gemini 3.1 Pro/Flash** | Reasoning, parsing, study notes |
-| **Nano Banana 2** | Educational image generation |
+| **Gemini Live API** | Real-time bidirectional voice + vision (mode-specific models) |
+| **Gemini 2.5 Flash Native Audio** | `preview-12-2025` for all modes (Lab, Exam, Tutor) |
+| **Gemini 3.1 Pro** | Exam evaluation, diagram analysis, study notes |
+| **Gemini 3.1 Flash Lite** | Textbook TOC parsing, chapter structure extraction |
+| **Gemini 3.1 Flash Image** | Nano Banana 2 - Educational image generation |
 | **Veo 3.1 Fast** | Concept animation videos |
-| **Gemini Embedding 2** | Multimodal RAG vectorization |
+| **Gemini Embedding 2** | Vector embeddings for diagram semantic search |
 
 ---
 
