@@ -104,7 +104,7 @@ flowchart TB
     MediaGallery -.-> |Fetches Gen-Media| UI
 
     %% Live Connection
-    LiveHook === |Bidirectional WebSockets| === LiveModel
+    LiveHook <--> |Bidirectional WebSockets| LiveModel
 
     %% Live Tool Executions
     LiveModel -.-> |Function Call: generate_image| ImgModel
