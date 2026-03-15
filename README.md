@@ -31,20 +31,9 @@ Mama AI is a **voice-first, multimodal AI tutor** that transforms how students l
 
 Traditional ed-tech forces students to type questions into a search box. Mama AI eliminates the keyboard entirely—students speak naturally, interrupt freely, and receive personalized visual explanations that bridge the gap between abstract concepts and real-world understanding.
 
-### ⚡ At a Glance
-
-| Category | What We Built |
-|----------|---------------|
-| **Challenge Category** | Live Agents 🗣️ (Audio/Vision) |
-| **Core Tech** | Gemini Live API + Gemini 3.1 Pro + Firebase + Cloud Run |
-| **Key Differentiator** | Textbook-grounded RAG for curriculum-aligned responses |
-| **Visual Generation** | Nano Banana 2 (images) + Veo 3.1 Fast (videos) |
-| **Learning Modes** | Lab → Tutor → Exam → Notes |
-| **Storage** | Firestore (data) + Cloud Storage (media) |
-
 ## 🗺️ System Architecture Diagram
 
-> **📋 Judge Note:** This section provides the **clear visual representation of the system** as required by the submission guidelines. It shows how **Gemini connects to the backend (Firebase), database (Firestore), and frontend (React)**.
+> **📋 Note:** This section provides the **clear visual representation of the system** as required. It shows how **Gemini connects to the backend (Firebase), database (Firestore), and frontend (React)**.
 
 ### Architecture Overview
 
