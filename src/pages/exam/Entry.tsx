@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Mic, MicOff, Image as ImageIcon, Loader2, Camera, Video, X, ArrowRight, Lightbulb, PlayCircle, ChevronLeft, ChevronUp, ChevronDown,
 } from 'lucide-react';
+import { useCamera } from '../../hooks/useCamera';
 import { useGeminiLive } from '../../hooks/useGeminiLive';
 import type { GeneratedMedia } from '../../hooks/useGeminiLive';
 import { WhiteboardView } from '../../components/whiteboard';
@@ -365,23 +366,32 @@ export default function ExamEntry() {
     profile?.voiceName || 'Victoria'
   );
 
-  // Live camera state for exam mode (optional vision)
-  const [isVideoActive, setIsVideoActive] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
   const [isGalleryCollapsed, setIsGalleryCollapsed] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  
+  // Camera hook for video capture with facing mode support
+  const {
+    isVideoActive,
+    cameraError: cameraHookError,
+    facingMode,
+    videoRef,
+    streamRef,
+    startVideo,
+    stopVideo,
+    switchCamera,
+    setCameraError: setCameraHookError,
+  } = useCamera({
+    onError: (err) => {
+      setCameraError(err);
+    },
+  });
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       // Stop any active camera stream and vision capture
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
+      stopVideo();
       stopVideoCapture();
-      setIsVideoActive(false);
       disconnect();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -538,70 +548,43 @@ Then wait for the user to respond before continuing.`;
     connect(instruction, previousMessages, selectedImage);
   };
 
-  // Live camera helpers (for vision inside exam mode)
-  const stopVideo = () => {
-    stopVideoCapture();
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setIsVideoActive(false);
-    setCameraError(null);
-  };
-
-  const startVideo = async () => {
+  // Handle video start with Gemini Live integration
+  const handleStartVideo = async () => {
     setCameraError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          frameRate: { ideal: 15 },
-        }
-      });
-
-      if (videoRef.current) {
-        const videoElement = videoRef.current;
-        videoElement.srcObject = stream;
-        const playVideo = () => {
-          videoElement.play().catch(err => {
-            console.warn('[Exam] video.play() failed:', err);
-            setCameraError('Camera started but video could not be displayed. Click the page and toggle the camera again.');
-          });
-        };
-        if ('onloadedmetadata' in videoElement) {
-          videoElement.onloadedmetadata = playVideo;
-        } else {
-          playVideo();
-        }
-      }
-
-      streamRef.current = stream;
-      setIsVideoActive(true);
-
+      await startVideo();
+      
       // Attach live vision to an existing session if already connected
       if (isConnected && videoRef.current) {
         startVideoCapture(videoRef.current);
       }
     } catch (err: any) {
-      console.error('[Exam] Failed to start camera:', err);
-      let errorMessage = 'Could not access camera.';
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        errorMessage = 'Camera permission denied. Please allow camera access in your browser settings and try again.';
-      } else if (err.name === 'NotFoundError') {
-        errorMessage = 'No camera found on this device.';
-      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-        errorMessage = 'Camera is already in use by another app. Please close other apps using the camera.';
-      }
-      setCameraError(errorMessage);
+      // Error is already handled by useCamera hook
+      console.error('[Exam] Failed to start video:', err);
     }
   };
 
-  const toggleVideo = () => {
+  // Handle video toggle
+  const handleToggleVideo = () => {
     if (isVideoActive) {
       stopVideo();
+      stopVideoCapture();
     } else {
-      startVideo();
+      handleStartVideo();
+    }
+  };
+
+  // Handle camera switch (front/back)
+  const handleSwitchCamera = async () => {
+    try {
+      await switchCamera();
+      // Re-attach to Gemini Live if connected
+      if (isConnected && videoRef.current) {
+        stopVideoCapture();
+        startVideoCapture(videoRef.current);
+      }
+    } catch (err) {
+      console.error('[Exam] Failed to switch camera:', err);
     }
   };
 
@@ -779,9 +762,9 @@ Then wait for the user to respond before continuing.`;
         </div>
 
         {/* Camera error banner */}
-        {cameraError && (
+        {(cameraError || cameraHookError) && (
           <div className="absolute top-8 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm font-medium shadow-md z-30 text-center">
-            {cameraError}
+            {cameraError || cameraHookError}
           </div>
         )}
 
@@ -818,8 +801,8 @@ Then wait for the user to respond before continuing.`;
                 <p className="text-lg font-medium animate-pulse">Mama AI is drawing…</p>
               </div>
             ) : currentImage ? (
-              <div className="relative w-full max-w-md aspect-square rounded-3xl overflow-hidden shadow-xl border border-zinc-200">
-                <img src={currentImage} alt="AI Generated" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              <div className="relative w-full max-w-xs rounded-3xl overflow-hidden shadow-xl border border-zinc-200" style={{ aspectRatio: '9/16' }}>
+                <img src={currentImage} alt="AI Generated" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                 {isMediaFocused && whiteboardState.steps.length > 0 && (
                   <button
                     onClick={hideMedia}
@@ -917,7 +900,7 @@ Then wait for the user to respond before continuing.`;
         <div className="flex items-center justify-center gap-10 max-w-md mx-auto">
 
           {/* Live video toggle */}
-          <button onClick={toggleVideo} className="flex flex-col items-center gap-2 group">
+          <button onClick={handleToggleVideo} className="flex flex-col items-center gap-2 group">
             <div className={`w-14 h-14 rounded-full flex items-center justify-center border transition-colors shadow-sm ${
               isVideoActive
                 ? 'bg-teal-500/10 border-teal-400 text-teal-600'
@@ -929,6 +912,22 @@ Then wait for the user to respond before continuing.`;
               {isVideoActive ? 'Live' : 'Video'}
             </span>
           </button>
+
+          {/* Camera Switch Button (only show when video is active) */}
+          {isVideoActive && (
+            <button 
+              onClick={handleSwitchCamera} 
+              className="flex flex-col items-center gap-2 group"
+              title={`Switch to ${facingMode === 'user' ? 'back' : 'front'} camera`}
+            >
+              <div className="w-12 h-12 rounded-full flex items-center justify-center border border-zinc-200 bg-zinc-50 text-zinc-600 group-hover:bg-zinc-100 transition-colors">
+                <Camera size={20} />
+              </div>
+              <span className="text-xs font-medium text-zinc-500">
+                {facingMode === 'user' ? 'Back' : 'Front'}
+              </span>
+            </button>
+          )}
 
           {/* Mic toggle / status */}
           <button onClick={handleMicClick} className="flex flex-col items-center gap-2 group">

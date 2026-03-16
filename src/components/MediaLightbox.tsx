@@ -122,6 +122,7 @@ export default function MediaLightbox({
             src={mediaUrl}
             controls
             autoPlay
+            muted
             className="max-w-full max-h-[90vh] rounded-lg"
           />
         )}

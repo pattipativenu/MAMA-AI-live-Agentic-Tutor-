@@ -120,6 +120,22 @@ export function useGeminiLive(
   // Track last AI message addition to prevent duplicates between text parts and audio transcription
   const lastAiMessageRef = useRef<{ text: string; timestamp: number } | null>(null);
 
+  // ===== ISSUE I FIX: AI-SPEAKING MUTE GATE =====
+  // Prevents AI from hearing its own audio (echo cancellation for mobile)
+  const isAiSpeakingRef = useRef(false);
+  const aiSpeakingCooldownRef = useRef<number | null>(null);
+  const AI_SPEAKING_COOLDOWN_MS = 800; // Keep mic muted 800ms after AI stops speaking
+
+  // ===== ISSUE II FIX: PAUSE FOR RESPONSE STATE =====
+  // Tracks when AI is waiting for user response after asking a question
+  const isWaitingForResponseRef = useRef(false);
+  // Tracks if pause_for_response was just called in this response batch
+  // Prevents dropping audio that was generated BEFORE the pause call
+  const pauseJustActivatedRef = useRef(false);
+  
+  // Ref to track media focus state (sync with isMediaFocused state for function handlers)
+  const isMediaFocusedRef = useRef(false);
+
   // Silence detection for audioStreamEnd (Gemini docs requirement).
   // SILENCE_FRAMES_BEFORE_END is intentionally large (600 frames ≈ 2.5 min)
   // to prevent premature sends on phone mics with consistently low RMS.
@@ -226,6 +242,17 @@ export function useGeminiLive(
       sessionTimerRef.current = null;
     }
 
+    // ===== ISSUE I FIX: Clear AI-speaking cooldown timer =====
+    if (aiSpeakingCooldownRef.current) {
+      window.clearTimeout(aiSpeakingCooldownRef.current);
+      aiSpeakingCooldownRef.current = null;
+    }
+    isAiSpeakingRef.current = false;
+
+    // ===== ISSUE II FIX: Reset waiting state =====
+    isWaitingForResponseRef.current = false;
+    pauseJustActivatedRef.current = false;
+
     // IMPORTANT: Stop audio/video capture BEFORE closing WebSocket
     // This prevents "WebSocket is already in CLOSING or CLOSED state" errors
     if (processorRef.current) {
@@ -290,13 +317,14 @@ export function useGeminiLive(
     whiteboardBufferRef.current = '';
     lastAiMessageRef.current = null;
 
-    // Trigger session save with the latest messages and generated media
-    // FIX: Always call onSessionEnd if it exists, even with empty messages
-    // This ensures Summary page doesn't get stuck waiting for a session
-    if (onSessionEnd) {
+    // Trigger session save with the latest messages and generated media.
+    // SKIP when reason is 'reconnecting' — the parent component must not treat
+    // an auto-reconnect as a real session end (which would save and navigate away).
+    if (onSessionEnd && reason !== 'reconnecting') {
       console.log('[GeminiLive] Saving session with', messagesRef.current.length, 'messages and', generatedMediaRef.current.length, 'media items');
-      console.log('[GeminiLive] Messages:', messagesRef.current);
       onSessionEnd([...messagesRef.current], [...generatedMediaRef.current]);
+    } else if (reason === 'reconnecting') {
+      console.log('[GeminiLive] Skipping onSessionEnd — reconnecting, not a real session end');
     } else {
       console.log('[GeminiLive] No onSessionEnd callback provided');
     }
@@ -504,7 +532,7 @@ export function useGeminiLive(
 
       const showMediaDeclaration: FunctionDeclaration = {
         name: "show_media",
-        description: "Display a previously generated image or video to the student while on the whiteboard. Use this mid-explanation to pull up a relevant visual, show it, explain it verbally, then call hide_media() to return to the whiteboard. Pass -1 to show the most recently generated media.",
+        description: "CAUTION: Media viewing is now USER-INITIATED. Students click gallery thumbnails to view images/videos manually. DO NOT call this during whiteboard explanations. Only used when student explicitly asks you to show a specific image (e.g., 'Can you show me the first diagram?'). Pass -1 to show the most recently generated media.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -523,6 +551,33 @@ export function useGeminiLive(
         parameters: {
           type: Type.OBJECT,
           properties: {}
+        }
+      };
+
+      // ===== ISSUE II FIX: pause_for_response function =====
+      const pauseForResponseDeclaration: FunctionDeclaration = {
+        name: "pause_for_response",
+        description: `CRITICAL: Call this function IMMEDIATELY after asking the user ANY question or prompting them for input. 
+
+This function PAUSES the AI and prevents any further output until the user responds.
+
+Examples of when you MUST call this function:
+- After asking "Are you on that page now?"
+- After asking "Do you understand?"
+- After asking "Can you see the diagram?"
+- After saying "Let me know when you're ready"
+- After asking any question that requires a user response
+
+DO NOT speak after calling this function. The AI will remain silent until the user speaks.`,
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            question_asked: {
+              type: Type.STRING,
+              description: "The exact question or prompt that was just asked to the user"
+            }
+          },
+          required: ["question_asked"]
         }
       };
 
@@ -560,7 +615,7 @@ export function useGeminiLive(
         model: liveModel,
         config: {
           tools: [
-  { functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration, showMediaDeclaration, hideMediaDeclaration] },
+  { functionDeclarations: [addWhiteboardStepDeclaration, highlightWhiteboardStepDeclaration, clearWhiteboardDeclaration, generateImageDeclaration, generateVideoDeclaration, showMediaDeclaration, hideMediaDeclaration, pauseForResponseDeclaration] },
   ...(mode === 'lab' ? [{ googleSearch: {} }] : []),
 ],
           responseModalities: [Modality.AUDIO],
@@ -696,6 +751,13 @@ export function useGeminiLive(
                       audioStreamEndSentRef.current = false;
                     }
 
+                    // ===== ISSUE I FIX: AI-SPEAKING MUTE GATE =====
+                    // CRITICAL: Discard audio if AI is speaking (prevents echo interruption on mobile)
+                    if (isAiSpeakingRef.current) {
+                      // Mic is muted because AI is speaking - don't send audio
+                      return;
+                    }
+
                     // Send audio to Gemini
                     sessionPromise.then((session) => {
                       if (session && sessionRef.current === session && !isCleaningUpRef.current) {
@@ -732,6 +794,13 @@ export function useGeminiLive(
               processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               if (isMutedRef.current) return;
+
+              // ===== ISSUE I FIX: AI-SPEAKING MUTE GATE =====
+              // CRITICAL: Discard audio if AI is speaking (prevents echo interruption on mobile)
+              if (isAiSpeakingRef.current) {
+                // Mic is muted because AI is speaking - don't process or send audio
+                return;
+              }
 
               const base64Data = float32ToPcm16Base64(inputData);
               let sum = 0;
@@ -821,6 +890,12 @@ export function useGeminiLive(
             if (message.setupComplete) console.log("[GeminiLive] Setup complete received.");
             if (message.serverContent?.turnComplete) {
               console.log("[GeminiLive] AI turn complete.");
+              // Reset pause activation flag after turn completes
+              // This ensures audio in subsequent responses is properly gated
+              if (pauseJustActivatedRef.current) {
+                pauseJustActivatedRef.current = false;
+                console.log('[GeminiLive] Pause gate armed — future audio will be dropped until user responds');
+              }
             }
 
             // Handle Tool Calls (Whiteboard, Image, Video Generation)
@@ -844,10 +919,11 @@ export function useGeminiLive(
                   const args = call.args as any;
                   console.log('[GeminiLive] add_whiteboard_step called:', args.math);
                   
-                  // CRITICAL: Close any open images/videos when whiteboard starts
-                  // This ensures the whiteboard is visible when AI says "Let me explain on the whiteboard"
+                  // CRITICAL: Whiteboard takes priority - always clear media focus
+                  // This ensures whiteboard is visible when AI says "Let me explain on the whiteboard"
                   setCurrentImage(null);
                   setIsMediaFocused(false);
+                  isMediaFocusedRef.current = false;
                   
                   // Add whiteboard step to messages for session tracking
                   updateMessages(prev => {
@@ -883,7 +959,7 @@ export function useGeminiLive(
                     };
                   });
                   setStatus('whiteboard');
-                  return { id: call.id, name: call.name, response: { result: 'Step added. NOW IMMEDIATELY call add_whiteboard_step again for the NEXT step of this explanation WITHOUT PAUSING. Keep building the derivation — write out ALL the key equations, definitions, fringe conditions, and formulas one step at a time. Do NOT stop after one step. Only pause to check understanding AFTER you have written at least 3–5 meaningful whiteboard steps that fully cover the concept with actual equations and values.' } };
+                  return { id: call.id, name: call.name, response: { result: 'Step added. Now PAUSE and ask the student a question about this step before continuing. Use pause_for_response() after your question to wait for their answer.' } };
                 }
 
                 if (call.name === 'highlight_whiteboard_step') {
@@ -1006,94 +1082,84 @@ export function useGeminiLive(
                 if (call.name === 'generate_video') {
                   const { concept, topicName, theme, visualStyle } = call.args as any;
                   console.log("[GeminiLive] Starting video generation for concept:", concept);
-                  // Don't change status to 'creating-video' - keep AI speaking
-                  // setStatus('creating-video');  // ← Removed to prevent muting
 
-                  try {
-                    const auth = getAuth();
-                    const userId = auth.currentUser?.uid;
+                  const auth = getAuth();
+                  const userId = auth.currentUser?.uid;
 
-                    if (!userId) {
-                      return { id: call.id, name: call.name, response: { success: false, message: "User not authenticated" } };
-                    }
-
-                    // Generate a session ID for this voice session
-                    const sessionId = `voice_${Date.now()}`;
-
-                    // Start async job (fire-and-forget pattern)
-                    const jobId = await startVideoGenerationJob(
-                      concept,
-                      userId,
-                      sessionId,
-                      undefined, // legacySlideId - not needed for voice mode
-                      {
-                        topicName: topicName || concept,
-                        theme: theme || 'realistic',
-                        aspectRatio: '9:16',
-                        visualStyle: visualStyle || 'diagram-only'  // NEW: Default to diagram-only
-                      }
-                    );
-
-                    // Set up subscription to get video when ready
-                    const unsubscribe = subscribeToVideoJobs(userId, sessionId, (jobs: VideoJob[]) => {
-                      const completedJob = jobs.find(j => j.id === jobId && j.status === 'completed');
-                      if (completedJob?.videoUrl) {
-                        console.log("[GeminiLive] Video ready:", completedJob.videoUrl);
-                        
-                        const mediaItem: GeneratedMedia = {
-                          type: 'video',
-                          url: completedJob.videoUrl,
-                          prompt: concept,
-                          timestamp: Date.now(),
-                          caption: `Animation: ${concept}`
-                        };
-                        
-                        setGeneratedMedia(prev => [...prev, mediaItem]);
-                        setCurrentMediaIndex(prev => prev + 1);
-                        
-                        // For Tutor mode: Don't auto-select - let user or sequential flow handle it
-                        // For Exam/Lab mode: Auto-select the new video
-                        if (mode !== 'tutor') {
-                          setCurrentImage(null); // Clear any current image
-                        }
-                        
-                        // Add video to messages for session history
-                        updateMessages(prev => {
-                          const last = prev[prev.length - 1];
-                          if (last && last.role === 'ai') {
-                            return [...prev.slice(0, -1), { ...last, video: completedJob.videoUrl }];
-                          }
-                          return [...prev, { role: 'ai', text: `Generated video: ${concept}`, video: completedJob.videoUrl }];
-                        });
-                        
-                        // Unsubscribe after getting the video
-                        unsubscribe();
-                      }
-                    });
-                    
-                    // Track subscription for cleanup
-                    videoJobUnsubscribersRef.current.push(unsubscribe);
-
-                    return {
-                      id: call.id,
-                      name: call.name,
-                      response: {
-                        success: true,
-                        message: `Video generation started for "${concept}" (takes 30-60 seconds, will appear automatically). CONTINUE EXPLAINING NOW without pausing - keep narrating while it generates in the background.`
-                      } 
-                    };
-                  } catch (e: any) {
-                    console.error("[GeminiLive] Video generation error:", e);
-                    // Add user-facing error feedback in the chat
-                    updateMessages(prev => [...prev, {
-                      role: 'ai' as const,
-                      text: `I tried to generate a video animation but ran into an issue: ${e.message}. I'll continue explaining without the video.`,
-                      timestamp: Date.now()
-                    }]);
-                    return { id: call.id, name: call.name, response: { success: false, message: e.message } };
-                  } finally {
-                    setStatus('explaining');
+                  if (!userId) {
+                    return { id: call.id, name: call.name, response: { success: false, message: "User not authenticated" } };
                   }
+
+                  // Generate a predictable job ID immediately (no await needed)
+                  const sessionId = `voice_${Date.now()}`;
+                  const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+                  // FIX: Fire-and-forget — never await startVideoGenerationJob inside the tool
+                  // response path. On production, the initial Firestore setDoc() can take
+                  // 200ms–2s, which blocks sendToolResponse and causes Gemini to stall.
+                  (async () => {
+                    try {
+                      const resolvedJobId = await startVideoGenerationJob(
+                        concept,
+                        userId,
+                        sessionId,
+                        jobId, // pass pre-generated jobId so subscription can find it
+                        {
+                          topicName: topicName || concept,
+                          theme: theme || 'realistic',
+                          aspectRatio: '9:16',
+                          visualStyle: visualStyle || 'diagram-only'
+                        }
+                      );
+
+                      // Set up subscription to get video when ready
+                      const unsubscribe = subscribeToVideoJobs(userId, sessionId, (jobs: VideoJob[]) => {
+                        const completedJob = jobs.find(j => j.id === resolvedJobId && j.status === 'completed');
+                        if (completedJob?.videoUrl) {
+                          console.log("[GeminiLive] Video ready:", completedJob.videoUrl);
+
+                          const mediaItem: GeneratedMedia = {
+                            type: 'video',
+                            url: completedJob.videoUrl,
+                            prompt: concept,
+                            timestamp: Date.now(),
+                            caption: `Animation: ${concept}`
+                          };
+
+                          setGeneratedMedia(prev => [...prev, mediaItem]);
+                          setCurrentMediaIndex(prev => prev + 1);
+
+                          if (mode !== 'tutor') {
+                            setCurrentImage(null);
+                          }
+
+                          updateMessages(prev => {
+                            const last = prev[prev.length - 1];
+                            if (last && last.role === 'ai') {
+                              return [...prev.slice(0, -1), { ...last, video: completedJob.videoUrl }];
+                            }
+                            return [...prev, { role: 'ai', text: `Generated video: ${concept}`, video: completedJob.videoUrl }];
+                          });
+
+                          unsubscribe();
+                        }
+                      });
+
+                      videoJobUnsubscribersRef.current.push(unsubscribe);
+                    } catch (e: any) {
+                      console.error("[GeminiLive] Background video generation error:", e);
+                    }
+                  })();
+
+                  // Return IMMEDIATELY — do not await anything above
+                  return {
+                    id: call.id,
+                    name: call.name,
+                    response: {
+                      success: true,
+                      message: `Video generation started for "${concept}" (takes 30-60 seconds, will appear automatically). CONTINUE EXPLAINING NOW without pausing - keep narrating while it generates in the background.`
+                    }
+                  };
                 }
                 if (call.name === 'show_media') {
                   const idx = (call.args as any).mediaIndex;
@@ -1109,13 +1175,35 @@ export function useGeminiLive(
                   if (targetUrl) {
                     setCurrentImage(targetUrl);
                     setIsMediaFocused(true);
+                    isMediaFocusedRef.current = true;
+                    console.log('[GeminiLive] Media focused - whiteboard steps will be queued');
                   }
                   return { id: call.id, name: call.name, response: { result: `Showing media item ${targetIndex}. Call hide_media() when done explaining it.` } };
                 }
 
                 if (call.name === 'hide_media') {
                   setIsMediaFocused(false);
+                  isMediaFocusedRef.current = false;
                   return { id: call.id, name: call.name, response: { result: 'Media closed. Whiteboard is now in focus.' } };
+                }
+
+                // ===== ISSUE II FIX: Handle pause_for_response =====
+                if (call.name === 'pause_for_response') {
+                  const args = call.args as any;
+                  console.log('[GeminiLive] PAUSED for response:', args.question_asked);
+                  
+                  // Set waiting state
+                  setStatus('waiting');
+                  isWaitingForResponseRef.current = true;
+                  
+                  return { 
+                    id: call.id, 
+                    name: call.name, 
+                    response: { 
+                      status: 'PAUSED',
+                      message: 'AI is now waiting for user response. Will resume when user speaks.'
+                    } 
+                  };
                 }
 
                 return { id: call.id, name: call.name, response: { success: false, message: "Unknown function" } };
@@ -1177,6 +1265,24 @@ export function useGeminiLive(
                 }
                 if (part.inlineData && part.inlineData.data && playbackContextRef.current
                     && playbackContextRef.current.state !== 'closed') {
+
+                  // ===== PAUSE GATE: Drop audio when waiting for user response =====
+                  // Only drop audio that was generated AFTER pause_for_response was called
+                  // Audio in the same batch as the pause call should still play
+                  if (isWaitingForResponseRef.current && !pauseJustActivatedRef.current) {
+                    console.log('[GeminiLive] Dropping AI audio — waiting for user response');
+                    continue;
+                  }
+
+                  // ===== ISSUE I FIX: AI-SPEAKING MUTE GATE =====
+                  // Mark AI as speaking to prevent echo from microphone
+                  isAiSpeakingRef.current = true;
+                  
+                  // Clear any existing cooldown timer
+                  if (aiSpeakingCooldownRef.current) {
+                    window.clearTimeout(aiSpeakingCooldownRef.current);
+                  }
+                  
                   if (playbackContextRef.current.state === 'suspended') {
                     playbackContextRef.current.resume().catch(() => {
                       console.warn('[GeminiLive] Failed to resume playback context');
@@ -1185,6 +1291,16 @@ export function useGeminiLive(
 
                   try {
                     const float32Data = pcm16Base64ToFloat32(part.inlineData.data);
+
+                    // Calculate audio duration for cooldown
+                    const audioDurationMs = (float32Data.length / 24000) * 1000;
+                    const cooldownDuration = Math.max(audioDurationMs + 200, AI_SPEAKING_COOLDOWN_MS);
+
+                    // Set cooldown timer to unmute mic after audio finishes + buffer
+                    aiSpeakingCooldownRef.current = window.setTimeout(() => {
+                      isAiSpeakingRef.current = false;
+                      console.log('[GeminiLive] AI-speaking cooldown ended, mic unmuted');
+                    }, cooldownDuration);
                     const audioBuffer = playbackContextRef.current.createBuffer(1, float32Data.length, 24000);
                     audioBuffer.getChannelData(0).set(float32Data);
 
@@ -1192,7 +1308,18 @@ export function useGeminiLive(
                     source.buffer = audioBuffer;
                     source.connect(playbackContextRef.current.destination);
 
-                    const startTime = Math.max(playbackContextRef.current.currentTime, nextPlayTimeRef.current);
+                    // FIX: Cap nextPlayTimeRef to at most 2s ahead of currentTime.
+                    // On production mobile, the AudioContext can be throttled/suspended
+                    // by heavy React renders (LaTeX, Firebase callbacks). When suspended,
+                    // currentTime stops advancing but nextPlayTimeRef keeps growing,
+                    // causing a long silent gap before audio resumes. Capping prevents
+                    // this drift from exceeding 2 seconds of buffering.
+                    const ctx = playbackContextRef.current;
+                    if (nextPlayTimeRef.current > ctx.currentTime + 2) {
+                      console.warn('[GeminiLive] Audio schedule drift detected, resetting nextPlayTime');
+                      nextPlayTimeRef.current = ctx.currentTime;
+                    }
+                    const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
                     source.start(startTime);
                     nextPlayTimeRef.current = startTime + audioBuffer.duration;
                   } catch (audioErr) {
@@ -1224,6 +1351,13 @@ export function useGeminiLive(
                   }
                   return [...prev, { role: 'user', text: inputTranscript, timestamp: now }];
                 });
+              }
+              
+              // ===== ISSUE II FIX: Resume from pause when user speaks =====
+              if (isWaitingForResponseRef.current) {
+                console.log('[GeminiLive] User responded after pause, resuming...');
+                isWaitingForResponseRef.current = false;
+                setStatus('listening');
               }
             }
 
@@ -1347,6 +1481,15 @@ export function useGeminiLive(
               console.log("[GeminiLive] Interrupted - clearing audio queue.");
               setStatus('listening');
               currentAiTextRef.current = '';
+              
+              // ===== BUG FIX 2: Clear AI-speaking gate on interrupt =====
+              // Immediately unmute mic when user interrupts AI
+              if (aiSpeakingCooldownRef.current) {
+                window.clearTimeout(aiSpeakingCooldownRef.current);
+                aiSpeakingCooldownRef.current = null;
+              }
+              isAiSpeakingRef.current = false;
+              
               // FIX: Don't destroy the AudioContext on interrupt. Closing it kills
               // all audio nodes and can cause subsequent audio to fail silently.
               // Instead, just reset the playback time so future audio starts
@@ -1623,6 +1766,7 @@ export function useGeminiLive(
   // Dismiss media focus manually (e.g. "← Back to Whiteboard" button)
   const hideMedia = useCallback(() => {
     setIsMediaFocused(false);
+    isMediaFocusedRef.current = false;
   }, []);
 
   return {

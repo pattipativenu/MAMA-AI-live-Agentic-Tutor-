@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, PlaySquare, Settings as SettingsIcon, Volume2, Play, AlertCircle } from 'lucide-react';
+import { User, Gamepad2, BookOpen, Tv, Rocket, Dumbbell, Palette, Music, Trophy, Eye, Ear, Hand, Save, CheckCircle2, Lock, Shield, LogOut, Camera, Sparkles, Landmark, Zap, Settings as SettingsIcon, Volume2, Play, AlertCircle } from 'lucide-react';
 import { UserProfile, GEMINI_VOICES, GeminiVoice } from '../hooks/useProfile';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, setDoc } from 'firebase/firestore';
@@ -490,28 +490,6 @@ export default function Settings() {
                   );
                 })}
               </div>
-            </div>
-
-            {/* Auto-Scroll Visuals */}
-            <div className="space-y-4 bg-white p-5 rounded-3xl border border-zinc-200 shadow-sm flex items-center justify-between">
-              <div className="pr-4">
-                <div className="flex items-center gap-2 text-zinc-800 mb-1">
-                  <PlaySquare size={18} className="text-[#fe9900]" />
-                  <h2 className="text-sm font-bold uppercase tracking-wider">Auto-Scroll Visuals</h2>
-                </div>
-                <p className="text-xs text-zinc-500 font-medium leading-relaxed">
-                  Automatically scrolls through images and visuals as Mama AI explains them — no manual tapping needed.
-                </p>
-              </div>
-
-              <button
-                onClick={() => setFormData({ ...formData, autoAdvanceCarousel: formData.autoAdvanceCarousel === undefined ? false : !formData.autoAdvanceCarousel })}
-                className={`w-14 h-8 flex items-center rounded-full p-1 transition-colors shrink-0 ${(formData.autoAdvanceCarousel !== false) ? 'bg-[#fe9900]' : 'bg-zinc-300'
-                  }`}
-              >
-                <div className={`bg-white w-6 h-6 rounded-full shadow-sm transform transition-transform ${(formData.autoAdvanceCarousel !== false) ? 'translate-x-6' : 'translate-x-0'
-                  }`} />
-              </button>
             </div>
 
           </div>

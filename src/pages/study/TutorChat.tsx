@@ -288,11 +288,11 @@ without verbally announcing it first.
 ═══ WHITEBOARD + MEDIA INTEGRATION ═══
 
 You also have two media tools: show_media(mediaIndex) and hide_media().
-When you have already generated images or videos and are explaining on the whiteboard:
-• Use show_media(-1) to pull up the most recently generated image/video mid-explanation.
-  Example: "Let me show you the diagram we just created..." → call show_media(-1) → explain verbally → call hide_media().
-• After showing and explaining the visual, call hide_media() to close it and return to the whiteboard.
-• Never leave show_media open indefinitely — always follow it with hide_media() once explained.`;
+MEDIA VIEWING IS USER-INITIATED: Students click gallery thumbnails to view images/videos manually. 
+• DO NOT call show_media() during whiteboard explanations — the whiteboard should remain visible
+• Images/videos generate in the background and appear in the gallery for optional viewing
+• Only use show_media() if student explicitly asks: "Can you show me the first diagram?"
+• The whiteboard is your PRIMARY teaching surface — media is supplementary only`;
 }
 function buildInteractivePauseInstructions(): string {
     return `
@@ -486,31 +486,10 @@ ${mediaContext}
     const mediaGalleryRef = useRef<HTMLDivElement>(null);
     const prevMediaLengthRef = useRef(0);
 
-    // Auto-scroll and auto-expand new images when autoAdvanceCarousel is enabled
+    // Track media count changes (no auto-expand — images only show via show_media())
     useEffect(() => {
-        const autoAdvance = profile?.autoAdvanceCarousel ?? true;
-        
-        // Check if new media was added
-        if (generatedMedia.length > prevMediaLengthRef.current) {
-            const newMedia = generatedMedia[generatedMedia.length - 1];
-            
-            // Auto-scroll to media gallery
-            if (mediaGalleryRef.current) {
-                mediaGalleryRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-            
-            // Auto-expand the new media if auto-advance is enabled
-            if (autoAdvance && voiceMode) {
-                // Small delay to let the thumbnail render first
-                const timer = setTimeout(() => {
-                    setSelectedMedia(newMedia);
-                }, 500);
-                return () => clearTimeout(timer);
-            }
-        }
-        
         prevMediaLengthRef.current = generatedMedia.length;
-    }, [generatedMedia, profile?.autoAdvanceCarousel, voiceMode]);
+    }, [generatedMedia]);
     
 
 
@@ -620,7 +599,8 @@ ${answersContent}
 
   <capabilities>
     <capability>The student can share photos of their handwritten work, diagrams, or problems using their camera. When they share an image, review it carefully and provide specific, constructive feedback.</capability>
-    <capability>You can generate visual aids (images/videos) to help explain concepts. Use these when visual explanations would be helpful.</capability>
+    <capability>Your PRIMARY teaching tool is the WHITEBOARD for all explanations, formulas, and derivations.</capability>
+    <capability>You can generate optional visual aids (images/videos) that appear in the gallery. These are supplementary materials — students click to view them manually. Do NOT interrupt whiteboard flow to show media.</capability>
   </capabilities>
 
   ${buildPageNumberInstructions(chapterContent || '')}
@@ -638,54 +618,30 @@ ${answersContent}
     <rule>Respond in the student's <preferred_language>.</rule>
     <rule>ONLY use the student's hobbies (${hobbies.join(', ') || 'general interests'}) for COMPLEX or DIFFICULT concepts that need analogies. For simple concepts, explain directly without hobby references. Use hobbies sparingly — at most once per explanation, only when it genuinely helps understanding.</rule>
     
-    <!-- MULTIMEDIA & VISUAL RULES -->
-    <rule>When generating images, ALWAYS apply the visual theme: ${theme}. Images MUST be in 9:16 portrait format for mobile viewing.</rule>
-    <rule>CONTROLLED MEDIA GENERATION: 
-      DEFAULT START (for ANY new concept/topic): Immediately generate 2 images + 1 video simultaneously at the beginning:
-        - Call generate_image twice (create 2 visual aids)
-        - Call generate_video once (create 1 animation)
-      These appear silently in the gallery while you continue explaining. DO NOT pause your explanation.
-      
-      AFTER THE FIRST 2 IMAGES:
-      - Generate additional images ONE AT A TIME only when needed during the explanation
-      - When you reach a concept needing visualization, call generate_image once
-      - Continue explaining while it generates
-      - When ready, call show_media(-1) to pull it up, explain it fully
-      - Call hide_media() to return to whiteboard
-      
-      VIDEO POLICY:
-      - First video is auto-generated at the start (with the 2 images)
-      - NEVER generate additional videos unless the student EXPLICITLY asks: "Can you make another video?" or "Show me a video of this"
-      - If student asks for a video, generate ONE video only, then wait for next request
-      
-      NEVER generate more than 2 images at once. After the initial 2, create images one at a time as needed.</rule>
-    <rule>GALLERY AUTO-SCROLL — STRICT SEQUENTIAL EXPLANATION: 
-      When multiple images/videos are in the gallery, you MUST explain them ONE BY ONE in sequence:
-      
-      STEP 1: Call show_media(0) to display the FIRST image
-      STEP 2: Give a FULL verbal explanation (4-5 sentences) describing what the student sees
-      STEP 3: Call hide_media() to return to whiteboard
-      STEP 4: Call show_media(1) to display the SECOND image  
-      STEP 5: Give FULL verbal explanation of the second image
-      STEP 6: Continue until all media is explained
-      
-      CRITICAL RULES:
-      - NEVER explain multiple images in one go - ONE at a time
-      - NEVER move to the next image until you've fully explained the current one
-      - ALWAYS say "Let me show you the next image" before calling show_media()
-      - If student closes the viewer, wait for them to ask to see it again
-      - Videos take 30-60 seconds to generate - check the gallery and explain them when ready</rule>
+    <!-- MULTIMEDIA & VISUAL RULES — WHITEBOARD FIRST APPROACH -->
+    <rule>WHITEBOARD IS PRIMARY: Your main teaching method is the WHITEBOARD. Use it for ALL explanations, formulas, derivations, and problem-solving. Do NOT interrupt whiteboard flow to show images.</rule>
+    <rule>MEDIA IS SUPPLEMENTARY: Generated images and videos are OPTIONAL supplementary materials that appear in the gallery. They are NOT the main teaching tool — the whiteboard is.</rule>
+    <rule>SILENT MEDIA GENERATION: 
+      - Images generate automatically in the BACKGROUND while you teach on the whiteboard
+      - DO NOT pause your explanation or wait for images to generate
+      - Images appear silently in the gallery at the bottom — do NOT call show_media() automatically
+      - Students can CLICK on gallery thumbnails to view images MANUALLY if they want</rule>
+    <rule>OPTIONAL MEDIA REFERENCES:
+      After completing a whiteboard explanation, you MAY briefly mention: "I've also created some visual aids in the gallery that you can check out for extra clarity."
+      OR at the very end: "There's also a short video animation in the gallery that might help reinforce what we covered."
+      That's it — do NOT explain the images in detail or force the user to view them.</rule>
+    <rule>NEVER use show_media() during whiteboard explanations. The whiteboard should remain visible throughout the lesson. Media viewing is entirely user-initiated via gallery clicks.</rule>
     <rule>When referencing textbook pages, ALWAYS pause and ask if the student has found the page before continuing.</rule>
     ${topicFocus ? `<rule>The student has chosen to focus on "${topicFocus}" — start by giving a clear, friendly introduction to this specific topic.</rule>` : ''}
   </rules>
 
   <response_triggers>
   Your next response type is determined by what just happened:
-  - <trigger>If the student asked a question → You are in ANSWER mode. Give a FULL explanation (see anti-brevity rules), THEN ask a follow-up question to check understanding.</trigger>
+  - <trigger>If the student asked a question → You are in ANSWER mode. Give a FULL whiteboard-based explanation (see anti-brevity rules), THEN ask a follow-up question to check understanding. DO NOT show images — keep whiteboard visible.</trigger>
   - <trigger>If you just asked a question → You are in LISTEN mode. End your turn IMMEDIATELY. Your very next utterance MUST begin by acknowledging THEIR words.</trigger>
-  - <trigger>If the student gave a wrong answer → You are in CORRECTION mode. First acknowledge what they got RIGHT, then gently correct. Use the whiteboard for formula errors.</trigger>
-  - <trigger>If the student says "I don't know" or asks for the answer → You are in SCAFFOLD mode. Give a HINT only — never the full answer. Follow the hint escalation ladder.</trigger>
-  - <trigger>If student shows camera image → You are in VISION mode. Describe what you see specifically, give feedback, then explain or correct.</trigger>
+  - <trigger>If the student gave a wrong answer → You are in CORRECTION mode. First acknowledge what they got RIGHT, then gently correct. Use the whiteboard for formula errors. Keep whiteboard visible.</trigger>
+  - <trigger>If the student says "I don't know" or asks for the answer → You are in SCAFFOLD mode. Give a HINT only — never the full answer. Follow the hint escalation ladder. Use whiteboard.</trigger>
+  - <trigger>If student shows camera image → You are in VISION mode. Describe what you see specifically, give feedback, then explain or correct on the whiteboard.</trigger>
   </response_triggers>
 
   <turn_taking_rules>
@@ -721,26 +677,19 @@ ${answersContent}
   </anti_brevity>
 
   <media_explanation_rule>
-  When you call show_media() to display an image or video, you MUST:
+  REMINDER: Media viewing is USER-INITIATED, not AI-driven. Students click gallery thumbnails to view images/videos manually.
   
-  1. FIRST announce you're showing an image: "Let me show you a visual that explains this..."
-  2. Call show_media() to display it
-  3. Give a FULL verbal explanation (minimum 4–5 sentences) describing:
-     - What they see in the visual
-     - The KEY detail they should focus on
-     - How it connects to the concept you're teaching
-  4. Ask a question to confirm understanding
-  5. Call hide_media() when done explaining
+  When a student clicks on a gallery image (triggering show_media from the UI), you do NOT need to explain the image in detail because:
+  - The whiteboard is your primary teaching surface
+  - The student chose to view this image themselves
+  - They can close it and return to the whiteboard anytime
   
-  EXAMPLE — Explaining an image:
-  "Let me show you a diagram that makes this clearer. [call show_media(0)] Look at this image — see how the light rays bend as they pass from air into water? Notice the normal line drawn perpendicular to the surface. The ray slows down in the denser medium, which causes that bending we call refraction. This is exactly what happens when you look at a straw in a glass of water — it appears bent! Can you see how the angle in water is smaller than the angle in air? [call hide_media()]"
+  Simply acknowledge: "Let me know if you have any questions about that visual!" and continue with whiteboard teaching.
   
-  EXAMPLE — Announcing before showing:
-  "I've created a visual aid for you. Let me pull it up and walk you through what you're seeing..." [then call show_media()]
-  
-  ❌ FORBIDDEN: Silent image display without verbal announcement
-  ❌ FORBIDDEN: "Here's the diagram" without detailed explanation
-  ✅ REQUIRED: Clear announcement → show_media() → detailed explanation → hide_media()
+  ❌ FORBIDDEN: Automatically calling show_media() during explanations
+  ❌ FORBIDDEN: Breaking whiteboard flow to show gallery images
+  ✅ REQUIRED: Keep whiteboard visible throughout the lesson
+  ✅ REQUIRED: Let students control when they view gallery images
   </media_explanation_rule>
 
   <engagement_continuation_rule>
@@ -909,6 +858,7 @@ ${answersContent}
     const [isVideoActive, setIsVideoActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [isGalleryCollapsed, setIsGalleryCollapsed] = useState(false);
+    const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
 
@@ -929,7 +879,7 @@ ${answersContent}
         try {
             const isMobile = /iphone|ipad|android/i.test(navigator.userAgent);
             const primaryConstraints: MediaStreamConstraints = isMobile
-                ? { video: { facingMode: 'environment' } }
+                ? { video: { facingMode } }
                 : { video: true };
 
             let stream = await navigator.mediaDevices.getUserMedia(primaryConstraints);
@@ -999,6 +949,51 @@ ${answersContent}
             stopVideo();
         } else {
             startVideo();
+        }
+    };
+
+    // Switch camera front/back
+    const handleSwitchCamera = async () => {
+        const newMode = facingMode === 'user' ? 'environment' : 'user';
+        setFacingMode(newMode);
+        
+        if (isVideoActive) {
+            // Stop current stream
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            }
+            stopVideoCapture();
+            
+            try {
+                const isMobile = /iphone|ipad|android/i.test(navigator.userAgent);
+                const primaryConstraints: MediaStreamConstraints = isMobile
+                    ? { video: { facingMode: newMode } }
+                    : { video: true };
+                    
+                const stream = await navigator.mediaDevices.getUserMedia(primaryConstraints);
+                if (videoRef.current) {
+                    const videoElement = videoRef.current;
+                    videoElement.srcObject = stream;
+                    const playVideo = () => {
+                        videoElement.play().catch(err => {
+                            console.warn('[TutorChat] video.play() failed on camera switch:', err);
+                        });
+                    };
+                    if ('onloadedmetadata' in videoElement) {
+                        videoElement.onloadedmetadata = playVideo;
+                    } else {
+                        playVideo();
+                    }
+                }
+                streamRef.current = stream;
+                
+                // Re-attach to Gemini Live if connected
+                if (isConnected && videoRef.current) {
+                    startVideoCapture(videoRef.current);
+                }
+            } catch (err: any) {
+                console.error("Failed to switch camera:", err);
+            }
         }
     };
 
@@ -1361,6 +1356,22 @@ ${answersContent}
                             </span>
                         </button>
 
+                        {/* Camera Switch Button (only show when video is active) */}
+                        {isVideoActive && (
+                            <button 
+                                onClick={handleSwitchCamera} 
+                                className="flex flex-col items-center gap-2 group"
+                                title={`Switch to ${facingMode === 'user' ? 'back' : 'front'} camera`}
+                            >
+                                <div className="w-12 h-12 rounded-full flex items-center justify-center border border-zinc-200 bg-zinc-50 text-zinc-600 group-hover:bg-zinc-100 transition-colors">
+                                    <Camera size={20} />
+                                </div>
+                                <span className="text-xs font-medium text-zinc-500">
+                                    {facingMode === 'user' ? 'Back' : 'Front'}
+                                </span>
+                            </button>
+                        )}
+
                         {/* Mic Button */}
                         <button onClick={toggleMute} className="flex flex-col items-center gap-2 group">
                             <div className={`w-16 h-16 rounded-full flex items-center justify-center border-2 transition-all shadow-sm ${
@@ -1460,11 +1471,12 @@ ${answersContent}
                                     </div>
                                 ) : (
                                     <div className="relative rounded-2xl overflow-hidden bg-zinc-900 shadow-2xl" style={{ aspectRatio: '9/16', maxHeight: '80vh' }}>
-                                        <video 
+                                        <video
                                             src={selectedMedia.url}
                                             controls
                                             autoPlay={isPlayingVideo}
                                             loop
+                                            muted
                                             className="w-full h-full object-contain"
                                             onPlay={() => setIsPlayingVideo(true)}
                                             onPause={() => setIsPlayingVideo(false)}
@@ -1678,10 +1690,11 @@ ${answersContent}
                                 </div>
                             ) : (
                                 <div className="relative rounded-2xl overflow-hidden bg-zinc-900 shadow-2xl" style={{ aspectRatio: '9/16', maxHeight: '80vh' }}>
-                                    <video 
+                                    <video
                                         src={selectedMedia.url}
                                         controls
                                         autoPlay={isPlayingVideo}
+                                        muted
                                         className="w-full h-full object-contain"
                                         onPlay={() => setIsPlayingVideo(true)}
                                         onPause={() => setIsPlayingVideo(false)}

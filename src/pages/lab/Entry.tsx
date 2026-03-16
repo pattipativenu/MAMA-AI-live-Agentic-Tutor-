@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Mic, MicOff, X, Video, VideoOff, Image as ImageIcon, Loader2, ChevronLeft, ChevronUp, ChevronDown } from 'lucide-react';
+import { Mic, MicOff, X, Video, VideoOff, Image as ImageIcon, Loader2, ChevronLeft, ChevronUp, ChevronDown, Camera } from 'lucide-react';
+import { useCamera, FacingMode } from '../../hooks/useCamera';
 import { useGeminiLive, type GeneratedMedia } from '../../hooks/useGeminiLive';
 import { WhiteboardView } from '../../components/whiteboard';
 import { useProfile, UserProfile } from '../../hooks/useProfile';
@@ -254,15 +255,33 @@ export default function LabEntry() {
   // Session state
   const sessionIdRef = useRef(Date.now().toString());
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isVideoActive, setIsVideoActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<GeneratedMedia | null>(null);
   const [isGalleryCollapsed, setIsGalleryCollapsed] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  
+  // Camera hook for video capture with facing mode support
+  const {
+    isVideoActive,
+    cameraError: cameraHookError,
+    facingMode,
+    videoRef,
+    streamRef,
+    startVideo,
+    stopVideo,
+    toggleVideo,
+    switchCamera,
+    setCameraError: setCameraHookError,
+  } = useCamera({
+    onStart: () => {
+      setSelectedImage(null);
+    },
+    onError: (err) => {
+      setCameraError(err);
+    },
+  });
 
   // Load existing session data when resuming
   const [resumingSession, setResumingSession] = useState<SavedSession | null>(null);
@@ -339,45 +358,12 @@ export default function LabEntry() {
     return () => clearInterval(id);
   }, [isConnected, messages, generatedMedia, saveSession]);
 
-  const stopVideo = () => {
-    stopVideoCapture();
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setIsVideoActive(false);
-  };
-
-  const startVideo = async () => {
+  // Handle video start with Gemini Live integration
+  const handleStartVideo = async () => {
     setCameraError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          frameRate: { ideal: 15 }
-        }
-      });
-      if (videoRef.current) {
-        const videoElement = videoRef.current;
-        videoElement.srcObject = stream;
-        const playVideo = () => {
-          videoElement.play().catch(err => {
-            console.warn('[Lab] video.play() failed:', err);
-            setCameraError('Camera started but video could not be displayed. Click the page and toggle the camera again.');
-          });
-        };
-        if ('onloadedmetadata' in videoElement) {
-          videoElement.onloadedmetadata = playVideo;
-        } else {
-          playVideo();
-        }
-        console.log('[Lab] Camera stream attached to video element');
-      }
-      streamRef.current = stream;
-      setIsVideoActive(true);
-      setSelectedImage(null);
-
+      await startVideo();
+      
       // If already connected, start sending frames directly; otherwise connect fresh with video
       if (isConnected) {
         if (videoRef.current) startVideoCapture(videoRef.current);
@@ -385,59 +371,32 @@ export default function LabEntry() {
         await handleConnect(null, videoRef.current);
       }
     } catch (err: any) {
-      console.error("[Lab] Failed to start video:", err);
-      // Provide user-friendly error messages
-      let errorMessage = 'Could not access camera';
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        errorMessage = 'Camera permission denied. Please allow camera access in your browser settings and try again.';
-      } else if (err.name === 'NotFoundError') {
-        errorMessage = 'No camera found on this device.';
-      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-        errorMessage = 'Camera is already in use by another app. Please close other apps using the camera.';
-      } else if (err.name === 'OverconstrainedError') {
-        errorMessage = 'Camera does not support the requested settings. Trying default camera...';
-        // Fallback to any available camera
-        try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
-          if (videoRef.current) {
-            const videoElement = videoRef.current;
-            videoElement.srcObject = fallbackStream;
-            const playVideo = () => {
-              videoElement.play().catch(playErr => {
-                console.warn('[Lab] fallback video.play() failed:', playErr);
-                setCameraError('Fallback camera started but video could not be displayed. Click the page and toggle the camera again.');
-              });
-            };
-            if ('onloadedmetadata' in videoElement) {
-              videoElement.onloadedmetadata = playVideo;
-            } else {
-              playVideo();
-            }
-          }
-          streamRef.current = fallbackStream;
-          setIsVideoActive(true);
-          setSelectedImage(null);
-          if (isConnected) {
-            if (videoRef.current) startVideoCapture(videoRef.current);
-          } else {
-            await handleConnect(null, videoRef.current);
-          }
-          setCameraError(null);
-          return;
-        } catch (fallbackErr) {
-          errorMessage = 'Could not access any camera on this device.';
-        }
-      }
-      
-      setCameraError(errorMessage);
+      // Error is already handled by useCamera hook
+      console.error('[Lab] Failed to start video:', err);
     }
   };
 
-  const toggleVideo = () => {
+  // Handle video toggle
+  const handleToggleVideo = () => {
     if (isVideoActive) {
       stopVideo();
+      stopVideoCapture();
     } else {
-      startVideo();
+      handleStartVideo();
+    }
+  };
+
+  // Handle camera switch (front/back)
+  const handleSwitchCamera = async () => {
+    try {
+      await switchCamera();
+      // Re-attach to Gemini Live if connected
+      if (isConnected && videoRef.current) {
+        stopVideoCapture();
+        startVideoCapture(videoRef.current);
+      }
+    } catch (err) {
+      console.error('[Lab] Failed to switch camera:', err);
     }
   };
 
@@ -530,9 +489,9 @@ Then wait for the user to respond before continuing.`;
       )}
 
       {/* Camera Error */}
-      {cameraError && (
+      {(cameraError || cameraHookError) && (
         <div className="absolute top-4 left-4 right-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl text-sm font-medium shadow-md z-50 text-center">
-          {cameraError}
+          {cameraError || cameraHookError}
         </div>
       )}
 
@@ -692,7 +651,7 @@ Then wait for the user to respond before continuing.`;
 
           {/* Video Button */}
           <button
-            onClick={toggleVideo}
+            onClick={handleToggleVideo}
             className="flex flex-col items-center gap-2 group"
           >
             <div className={`w-14 h-14 rounded-full flex items-center justify-center border transition-colors ${isVideoActive ? 'bg-teal-50 border-teal-200 text-teal-600 shadow-sm' : 'bg-zinc-50 border-zinc-200 text-zinc-600 group-hover:bg-zinc-100'}`}>
@@ -700,6 +659,22 @@ Then wait for the user to respond before continuing.`;
             </div>
             <span className={`text-xs font-medium ${isVideoActive ? 'text-teal-600' : 'text-zinc-500'}`}>Video</span>
           </button>
+
+          {/* Camera Switch Button (only show when video is active) */}
+          {isVideoActive && (
+            <button
+              onClick={handleSwitchCamera}
+              className="flex flex-col items-center gap-2 group"
+              title={`Switch to ${facingMode === 'user' ? 'back' : 'front'} camera`}
+            >
+              <div className="w-12 h-12 rounded-full flex items-center justify-center border border-zinc-200 bg-zinc-50 text-zinc-600 group-hover:bg-zinc-100 transition-colors">
+                <Camera size={20} />
+              </div>
+              <span className="text-xs font-medium text-zinc-500">
+                {facingMode === 'user' ? 'Back' : 'Front'}
+              </span>
+            </button>
+          )}
 
           {/* Mic Button */}
           <button

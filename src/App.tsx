@@ -55,13 +55,13 @@ export default function App() {
   };
 
   if (hasKey === null) {
-    return <div className="min-h-screen bg-[rgb(250,249,245)] flex items-center justify-center text-zinc-900">Loading...</div>;
+    return <div key="loading" className="min-h-screen bg-[rgb(250,249,245)] flex items-center justify-center text-zinc-900">Loading...</div>;
   }
 
   // We only enforce API key check if the user is authenticated and trying to use the app
   if (!hasKey && currentUser && userProfile) {
     return (
-      <div className="min-h-screen bg-[rgb(250,249,245)] flex flex-col items-center justify-center text-zinc-900 p-6 text-center">
+      <div key="api-key-required" className="min-h-screen bg-[rgb(250,249,245)] flex flex-col items-center justify-center text-zinc-900 p-6 text-center">
         <h1 className="text-2xl font-bold mb-4">API Key Required</h1>
         <p className="text-zinc-600 mb-8 max-w-md">
           To use Mama AI's advanced features, you need to select a Google AI Studio API key.
