@@ -91,6 +91,8 @@ export function useGeminiLive(
   // Audio playback state
   const playbackContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
+  // Track every BufferSourceNode so we can stop them all instantly on interrupt/disconnect
+  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
 
   // Guard to prevent double connection
   const isConnectingRef = useRef(false);
@@ -221,9 +223,19 @@ export function useGeminiLive(
     }
   }, [status, isMuted, whiteboardState.isActive]);
 
+  // Stop every pending/playing BufferSourceNode immediately.
+  // Call before resetting nextPlayTimeRef to prevent new chunks from overlapping
+  // with already-scheduled (but not yet finished) sources.
+  const stopAllActiveSources = useCallback(() => {
+    activeSourcesRef.current.forEach(src => {
+      try { src.stop(); } catch (_) { /* already stopped or never started */ }
+    });
+    activeSourcesRef.current = [];
+  }, []);
+
   const disconnect = useCallback((reason?: string) => {
     console.log("[GeminiLive] Disconnecting and cleaning up...", reason);
-    
+
     // Mark cleanup in progress - this suppresses WebSocket errors
     isCleaningUpRef.current = true;
     
@@ -286,6 +298,9 @@ export function useGeminiLive(
       }
     }
 
+    // Stop all pending audio immediately — prevents tail overlap after disconnect
+    stopAllActiveSources();
+
     if (audioContextRef.current) {
       if (audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close();
@@ -330,7 +345,7 @@ export function useGeminiLive(
     } else {
       console.log('[GeminiLive] No onSessionEnd callback provided');
     }
-  }, [onSessionEnd]);
+  }, [onSessionEnd, stopAllActiveSources]);
 
   const connect = useCallback(async (
     systemInstruction: string, 
@@ -459,7 +474,7 @@ export function useGeminiLive(
 
       const addWhiteboardStepDeclaration: FunctionDeclaration = {
         name: "add_whiteboard_step",
-        description: "Add ONE step to the whiteboard at a time. Call this once per step to build up a solution progressively — like a teacher writing on a physical whiteboard. PAUSE between steps to ask the student questions and check understanding. Do NOT add all steps in one call.",
+        description: "Add ONE step to the whiteboard at a time. MANDATORY: call this function every single time you say a formula, equation, or calculation step aloud — writing formulas verbally without also calling this function is FORBIDDEN. Build the solution progressively, one step per call, like a teacher writing on a physical whiteboard. PAUSE at key conceptual milestones (not after every sub-calculation) to ask the student a question. Do NOT add all steps in one call.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -604,16 +619,13 @@ DO NOT speak after calling this function. The AI will remain silent until the us
       //   "model ... is not found for API version v1beta, or is not
       //    supported for bidiGenerateContent. Call ListModels to see
       //    which models are available."
-      // - `gemini-2.5-flash-native-audio-preview-12-2025` is the correct
-      //   native-audio model for Google AI Studio (v1beta endpoint).
-      //   Native audio models ONLY support Modality.AUDIO — adding
+      // - Native audio models ONLY support Modality.AUDIO — adding
       //   Modality.TEXT causes an immediate 1008 WebSocket disconnect.
-      // Model selection by mode:
-      // - Tutor: 'latest' (most stable for large chapter content)
-      // - Lab/Exam: 'preview-12-2025' (specific features needed)
-      const liveModel = mode === 'tutor'
-        ? 'gemini-2.5-flash-native-audio-latest'
-        : 'gemini-2.5-flash-native-audio-preview-12-2025';
+      // - The Dec 2025 build ('preview-12-2025' / 'latest') has a known
+      //   platform regression: the session terminates with 1008 the moment
+      //   the model tries to emit function-call arguments. Use the Sept 2025
+      //   build which is confirmed stable with all tool declarations.
+      const liveModel = 'gemini-2.5-flash-native-audio-preview-09-2025';
       const sessionPromise = ai.live.connect({
         model: liveModel,
         config: {
@@ -633,6 +645,11 @@ DO NOT speak after calling this function. The AI will remain silent until the us
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           contextWindowCompression: { slidingWindow: {} },
+          generationConfig: {
+            thinkingConfig: {
+              thinkingBudget: 0,   // disable thinking tokens — prevents chain-of-thought text
+            },                     // from leaking into modelTurn.parts as part.text entries
+          },
         },
         callbacks: {
           onopen: async () => {
@@ -1199,10 +1216,11 @@ DO NOT speak after calling this function. The AI will remain silent until the us
                 if (call.name === 'pause_for_response') {
                   const args = call.args as any;
                   console.log('[GeminiLive] PAUSED for response:', args.question_asked);
-                  
+
                   // Set waiting state
                   setStatus('waiting');
                   isWaitingForResponseRef.current = true;
+                  pauseJustActivatedRef.current = true;  // allow current audio batch to finish before muting
                   
                   return { 
                     id: call.id, 
@@ -1250,6 +1268,10 @@ DO NOT speak after calling this function. The AI will remain silent until the us
             const parts = message.serverContent?.modelTurn?.parts;
             if (parts) {
               for (const part of parts) {
+                // Skip internal thinking/reasoning summaries — these are model-internal
+                // and must never be shown to the user or treated as real AI speech.
+                if ((part as any).thought) continue;
+
                 if (part.text) {
                   console.log("[GeminiLive] AI Text Response:", part.text);
                   // Add AI text to messages (avoid duplicates with audio transcription)
@@ -1299,6 +1321,7 @@ DO NOT speak after calling this function. The AI will remain silent until the us
 
                   try {
                     const float32Data = pcm16Base64ToFloat32(part.inlineData.data);
+                    // #endregion
 
                     // Calculate audio duration for cooldown
                     const audioDurationMs = (float32Data.length / 24000) * 1000;
@@ -1315,21 +1338,27 @@ DO NOT speak after calling this function. The AI will remain silent until the us
                     const source = playbackContextRef.current.createBufferSource();
                     source.buffer = audioBuffer;
                     source.connect(playbackContextRef.current.destination);
-
-                    // FIX: Cap nextPlayTimeRef to at most 2s ahead of currentTime.
-                    // On production mobile, the AudioContext can be throttled/suspended
-                    // by heavy React renders (LaTeX, Firebase callbacks). When suspended,
-                    // currentTime stops advancing but nextPlayTimeRef keeps growing,
-                    // causing a long silent gap before audio resumes. Capping prevents
-                    // this drift from exceeding 2 seconds of buffering.
                     const ctx = playbackContextRef.current;
-                    if (nextPlayTimeRef.current > ctx.currentTime + 2) {
-                      console.warn('[GeminiLive] Audio schedule drift detected, resetting nextPlayTime');
+                    // Sequential scheduling — chain each chunk immediately after the previous one.
+                    // Only reset if behind (initialization or stale clock). Do NOT add a forward
+                    // cap: multi-turn responses legitimately queue several seconds ahead, and
+                    // resetting mid-stream without stopping pending sources causes overlap.
+                    if (!Number.isFinite(nextPlayTimeRef.current) || nextPlayTimeRef.current <= 0) {
                       nextPlayTimeRef.current = ctx.currentTime;
                     }
+                    if (nextPlayTimeRef.current < ctx.currentTime - 0.05) {
+                      nextPlayTimeRef.current = ctx.currentTime;
+                    }
+
                     const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
                     source.start(startTime);
                     nextPlayTimeRef.current = startTime + audioBuffer.duration;
+
+                    // Track this source so we can stop it immediately on interrupt/disconnect
+                    activeSourcesRef.current.push(source);
+                    source.addEventListener('ended', () => {
+                      activeSourcesRef.current = activeSourcesRef.current.filter(s => s !== source);
+                    }, { once: true });
                   } catch (audioErr) {
                     console.warn('[GeminiLive] Audio playback error:', audioErr);
                   }
@@ -1498,10 +1527,10 @@ DO NOT speak after calling this function. The AI will remain silent until the us
               }
               isAiSpeakingRef.current = false;
               
-              // FIX: Don't destroy the AudioContext on interrupt. Closing it kills
-              // all audio nodes and can cause subsequent audio to fail silently.
-              // Instead, just reset the playback time so future audio starts
-              // immediately (effectively clearing the queued audio).
+              // Stop all pending BufferSourceNodes immediately so interrupted audio
+              // doesn't keep playing as a "tail" while the AI's next response begins.
+              // Then reset the scheduling clock so the next response starts immediately.
+              stopAllActiveSources();
               if (playbackContextRef.current && playbackContextRef.current.state !== 'closed') {
                 nextPlayTimeRef.current = playbackContextRef.current.currentTime;
               }
