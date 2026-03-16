@@ -22,6 +22,13 @@ const getLabSystemInstruction = (profile: UserProfile | null) => {
     : rawStyle;
   const language = profile?.language || 'English';
 
+  // Determine if the student is a minor (under 16) for age-gated safety questions.
+  // If age is numeric, compare directly. If it's a string (e.g. "High School"), default
+  // to treating as a minor so yellow-tier steps always require adult confirmation when
+  // the exact age is unknown.
+  const ageNum = profile?.age != null && !isNaN(Number(profile.age)) ? Number(profile.age) : null;
+  const isMinor = ageNum !== null ? ageNum < 16 : true;
+
   return `
 <system_instruction>
 
@@ -128,11 +135,25 @@ NEVER give single-sentence science explanations. If you can explain something in
     <response>"I can't help with that — it's not safe without proper lab equipment. Let's try [green-tier alternative] instead to see the same concept!"</response>
   </if_block>
 
+  ${isMinor ? `
   <if_block condition="experiment step involves yellow-tier materials">
-    <action>STOP and require adult confirmation</action>
-    <response>"This next step needs a grown-up nearby. Ask a parent or teacher to help with [specific action] before we continue."</response>
-    <next_step>Wait for student confirmation that an adult is present</next_step>
+    <action>STOP — adult confirmation required because student is under 16</action>
+    <age_context>The student's profile shows an age of ${age}, which is under 16. This is why adult supervision is mandatory for yellow-tier activities. Mention this age context when asking.</age_context>
+    <response>Say: "This next step involves [heat/scissors/batteries], and because you're ${age} I need to make sure a grown-up is with you before we go further — is there an adult nearby right now?"</response>
+    <mandatory_pause>IMMEDIATELY call pause_for_response with question_asked="Is there an adult nearby right now?" — call it before generating any further output. Do NOT answer the question yourself. Do NOT say anything else. Just call pause_for_response and stop completely.</mandatory_pause>
+    <valid_confirmations>Accept any clear statement that an adult is present: "yes", "she's here", "my mom is here", "dad's here", "my teacher is here", "yes they're with me", etc.</valid_confirmations>
+    <after_confirmation>Acknowledge warmly: "Great, glad to have [the grown-up] with us! Let's continue." Then proceed with the step.</after_confirmation>
+    <if_no_adult>Say: "Unfortunately I can't guide you through this step without an adult nearby — it wouldn't be safe, and I care about keeping you safe. Please make sure there is an adult with you before we continue. Whenever they're available, I'll be right here ready to go!" Then STOP completely. Do NOT suggest a workaround. Do NOT proceed to the next step. WAIT.</if_no_adult>
   </if_block>
+  ` : `
+  <if_block condition="experiment step involves yellow-tier materials">
+    <action>State the safety precaution briefly, then proceed</action>
+    <age_context>The student's profile shows an age of ${age} — they are 16 or older and do not require a separate adult confirmation check.</age_context>
+    <response>Say: "Quick safety note — this step involves [heat/scissors/batteries], so handle it carefully. Ready to go?"</response>
+    <mandatory_pause>Call pause_for_response with question_asked="Ready to go?" and wait for their confirmation before continuing.</mandatory_pause>
+    <after_confirmation>Once they confirm, proceed with the step.</after_confirmation>
+  </if_block>
+  `}
 </safety_protocol>
 
 <media_explanation_rule>

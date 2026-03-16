@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { WhiteboardState } from '../../types/whiteboard';
 import WhiteboardStep from './WhiteboardStep';
-import { Calculator, ChevronUp, ChevronDown } from 'lucide-react';
+import { Calculator, ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 
 interface WhiteboardViewProps {
   whiteboardState: WhiteboardState;
@@ -11,7 +11,7 @@ interface WhiteboardViewProps {
 export default function WhiteboardView({ whiteboardState, onStepComplete }: WhiteboardViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const stepRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const { isActive, problemTitle, steps, currentStepIndex, highlightedStepIndex } = whiteboardState;
+  const { isActive, isPending, problemTitle, steps, currentStepIndex, highlightedStepIndex } = whiteboardState;
 
   const handleStepComplete = useCallback((index: number) => {
     onStepComplete(index);
@@ -36,6 +36,18 @@ export default function WhiteboardView({ whiteboardState, onStepComplete }: Whit
 
   if (!isActive && steps.length === 0) {
     return null;
+  }
+
+  // Pending state: whiteboard area visible but AI hasn't written the first step yet.
+  // Show a spinner so the student sees immediate feedback when AI announces the whiteboard.
+  if (isPending && steps.length === 0) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-[#faf9f5] gap-3">
+        <Calculator size={32} className="text-amber-400" />
+        <Loader2 size={24} className="text-amber-500 animate-spin" />
+        <p className="text-sm text-zinc-400 font-medium">Writing on whiteboard…</p>
+      </div>
+    );
   }
 
   return (

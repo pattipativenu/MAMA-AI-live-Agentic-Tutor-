@@ -976,6 +976,7 @@ DO NOT speak after calling this function. The AI will remain silent until the us
                     };
                     return {
                       isActive: true,
+                      isPending: false,  // First real step arrived — clear the pending spinner
                       problemTitle: args.title || prev.problemTitle || 'Solution',
                       steps: [...prev.steps, newStep],
                       currentStepIndex: prev.steps.length,  // Index of the new step
@@ -1323,15 +1324,6 @@ DO NOT speak after calling this function. The AI will remain silent until the us
                     const float32Data = pcm16Base64ToFloat32(part.inlineData.data);
                     // #endregion
 
-                    // Calculate audio duration for cooldown
-                    const audioDurationMs = (float32Data.length / 24000) * 1000;
-                    const cooldownDuration = Math.max(audioDurationMs + 200, AI_SPEAKING_COOLDOWN_MS);
-
-                    // Set cooldown timer to unmute mic after audio finishes + buffer
-                    aiSpeakingCooldownRef.current = window.setTimeout(() => {
-                      isAiSpeakingRef.current = false;
-                      console.log('[GeminiLive] AI-speaking cooldown ended, mic unmuted');
-                    }, cooldownDuration);
                     const audioBuffer = playbackContextRef.current.createBuffer(1, float32Data.length, 24000);
                     audioBuffer.getChannelData(0).set(float32Data);
 
@@ -1353,6 +1345,24 @@ DO NOT speak after calling this function. The AI will remain silent until the us
                     const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
                     source.start(startTime);
                     nextPlayTimeRef.current = startTime + audioBuffer.duration;
+
+                    // Anchor mute-gate cooldown to when this chunk will FINISH PLAYING, not when
+                    // it arrived. nextPlayTimeRef.current is now the scheduled end of this chunk.
+                    // On mobile, speaker echo persists ~600ms after the last sample — add that buffer.
+                    // This replaces the old arrival-time cooldown that caused the mic to re-open while
+                    // future-scheduled chunks were still queued up and playing.
+                    const playbackEndsInMs = Math.max(
+                      0,
+                      (nextPlayTimeRef.current - ctx.currentTime) * 1000
+                    ) + 600;
+                    if (aiSpeakingCooldownRef.current) {
+                      window.clearTimeout(aiSpeakingCooldownRef.current);
+                      aiSpeakingCooldownRef.current = null;
+                    }
+                    aiSpeakingCooldownRef.current = window.setTimeout(() => {
+                      isAiSpeakingRef.current = false;
+                      aiSpeakingCooldownRef.current = null;
+                    }, playbackEndsInMs);
 
                     // Track this source so we can stop it immediately on interrupt/disconnect
                     activeSourcesRef.current.push(source);
@@ -1407,7 +1417,20 @@ DO NOT speak after calling this function. The AI will remain silent until the us
               // Detect smart status based on accumulated text
               const smartStatus = detectSmartStatus(currentAiTextRef.current);
               setStatus(smartStatus);
-              
+
+              // Pre-activate whiteboard UI when AI mentions it in speech, before
+              // add_whiteboard_step function call arrives (~600ms–1s earlier).
+              // This hides the mic indicator and shows a "Writing on whiteboard…" spinner
+              // immediately, so the student sees instant visual feedback.
+              const whiteboardPhrase = /\b(whiteboard|let me (write|show|draw|pull|use)|pull (the|up|out)|bring (up|out) the)\b/i;
+              if (whiteboardPhrase.test(outputTranscript) && !whiteboardState.isActive) {
+                setWhiteboardState(prev => ({
+                  ...prev,
+                  isActive: true,
+                  isPending: true,
+                }));
+              }
+
               // Process whiteboard markers
               const previousStepCount = whiteboardState.steps.length;
               whiteboardBufferRef.current += outputTranscript;

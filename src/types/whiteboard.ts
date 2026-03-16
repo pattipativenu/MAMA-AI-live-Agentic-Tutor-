@@ -16,6 +16,7 @@ export interface WhiteboardStep {
 
 export interface WhiteboardState {
   isActive: boolean;
+  isPending?: boolean;           // Whiteboard area visible but first step not yet received
   problemTitle: string;
   steps: WhiteboardStep[];
   currentStepIndex: number;
