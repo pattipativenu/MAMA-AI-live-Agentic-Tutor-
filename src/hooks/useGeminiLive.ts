@@ -98,6 +98,7 @@ export function useGeminiLive(
   const isCleaningUpRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 3;
+  const connectionIdRef = useRef<number>(0);
 
   // WebSocket state tracking for function call safety
   const webSocketStateRef = useRef<'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED'>('CLOSED');
@@ -275,6 +276,7 @@ export function useGeminiLive(
     // This prevents the race condition causing error spam
     const sessionToClose = sessionRef.current;
     sessionRef.current = null; // Clear ref immediately so audio callbacks stop
+    connectionIdRef.current += 1; // Invalidate any pending connection promises
     
     if (sessionToClose) {
       try {
@@ -370,6 +372,7 @@ export function useGeminiLive(
         setGeneratedMedia(mediaToPreserve);
       }
       
+      const currentConnectionId = ++connectionIdRef.current;
       setCurrentImage(null);
       setCurrentMediaIndex(0);
       isConnectingRef.current = true;
@@ -633,6 +636,11 @@ DO NOT speak after calling this function. The AI will remain silent until the us
         },
         callbacks: {
           onopen: async () => {
+            if (currentConnectionId !== connectionIdRef.current) {
+              console.log("[GeminiLive] Stale websocket connection opened. Closing immediately.");
+              sessionPromise.then(s => s?.close());
+              return;
+            }
             console.log("[GeminiLive] WebSocket connection OPEN");
             // Reset reconnection attempts on successful connection
             reconnectAttemptsRef.current = 0;
@@ -1591,7 +1599,14 @@ DO NOT speak after calling this function. The AI will remain silent until the us
         }
       });
 
-      sessionRef.current = await sessionPromise;
+      const finalSession = await sessionPromise;
+      if (currentConnectionId !== connectionIdRef.current) {
+        console.log("[GeminiLive] Connect promise resolved but connection is stale. Closing.");
+        finalSession?.close();
+        return;
+      }
+      
+      sessionRef.current = finalSession;
 
     } catch (error: any) {
       console.error("[GeminiLive] Failed to connect:", error);
