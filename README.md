@@ -15,9 +15,13 @@
 [![Cloud Run](https://img.shields.io/badge/Cloud_Run-Deployed-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/run)
 [![Cloud Storage](https://img.shields.io/badge/Cloud_Storage-Media_Cache-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/storage)
 
-**☁️ Cloud Run URL**: [https://mama-ai-service-972465918951.us-central1.run.app](https://mama-ai-service-972465918951.us-central1.run.app)  
-**🎥 Demo Video**: [Watch the Demo on YouTube](https://youtu.be/xJ93dscm2UY)
 </div>
+
+> [!IMPORTANT]
+> ### 🔗 Important Project Links
+> **☁️ Cloud Run URL**: [https://mama-ai-service-972465918951.us-central1.run.app](https://mama-ai-service-972465918951.us-central1.run.app)  
+> **🎥 Demo Video**: [Watch the Demo on YouTube](https://youtu.be/xJ93dscm2UY)  
+> **🚀 GCP Deployment**: [Watch the Deployment Walkthrough on YouTube](https://youtu.be/QqI5NMlA1D4)
 
 ## 🌟 Overview
 
