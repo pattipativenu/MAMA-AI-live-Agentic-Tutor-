@@ -16,3 +16,10 @@ coverage/
 
 # Documentation drafts
 docs/superpowers/
+
+# Google Cloud SDK (extracted locally, not part of the project)
+google-cloud-sdk/
+google-cloud-cli-*.tar.gz
+
+# Firebase local cache
+.firebase/
