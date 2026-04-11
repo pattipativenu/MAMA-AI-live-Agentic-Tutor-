@@ -5,8 +5,10 @@ node_modules/
 dist/
 build/
 
-# Local env files (secrets are injected via Cloud Run env vars)
-.env*
+# NOTE: Do not list `.env` / `.env.local` here. Vite inlines `import.meta.env.VITE_*`
+# at *image build* time. Cloud Run runtime environment variables are not visible to
+# the static nginx bundle, so excluding env files produces a client with no Firebase
+# config (Firestore profile load/save fails; users see onboarding + save errors).
 
 # Google Cloud SDK — extracted locally, not needed in container
 google-cloud-sdk/

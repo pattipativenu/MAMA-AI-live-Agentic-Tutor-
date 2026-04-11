@@ -13,6 +13,23 @@ echo "===================================================="
 echo "🚀 Starting Automated Deployment for Mama AI..."
 echo "===================================================="
 
+# Vite bakes VITE_* into the JS bundle at Docker build time. Ensure env is present
+# in the build context (.env and/or .env.local on disk when you run this script).
+for envfile in .env .env.local; do
+  if [ -f "$envfile" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$envfile"
+    set +a
+  fi
+done
+if [ -z "${VITE_FIREBASE_PROJECT_ID:-}" ]; then
+  echo "ERROR: VITE_FIREBASE_PROJECT_ID is unset."
+  echo "Create .env.local (see .env.example) in this directory before deploy, or export VITE_FIREBASE_* variables."
+  echo "Cloud Run env vars alone cannot fix this: the browser bundle is built without them if env files are missing."
+  exit 1
+fi
+
 # 1. Build and push the Docker image using Google Cloud Build
 echo "Building Docker image and pushing to Container Registry..."
 gcloud builds submit --tag $IMAGE_NAME --project $PROJECT_ID
