@@ -1,5 +1,6 @@
-@import "tailwindcss";
+/* External @import must come before Tailwind so the stylesheet stays valid for the browser. */
 @import url('https://fonts.googleapis.com/css2?family=Kavoon&display=swap');
+@import "tailwindcss";
 
 @layer utilities {
   .font-kavoon {

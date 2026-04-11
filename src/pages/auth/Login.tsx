@@ -30,6 +30,21 @@ export default function Login() {
     }
   };
 
+  const handleSkip = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@mama.ai';
+      const demoPassword = import.meta.env.VITE_DEMO_PASSWORD || 'password123';
+      await signInWithEmailAndPassword(auth, demoEmail, demoPassword);
+      navigate('/');
+    } catch (err: any) {
+      setError(err.message || 'Demo account not configured. Please login manually.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[rgb(250,249,245)] flex flex-col justify-center items-center p-6 text-zinc-900">
       <div className="w-full max-w-sm space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -112,6 +127,17 @@ export default function Login() {
             Sign up
           </Link>
         </p>
+
+        <div className="pt-4 border-t border-zinc-200">
+          <button
+            type="button"
+            onClick={handleSkip}
+            disabled={loading}
+            className="w-full text-zinc-500 font-bold py-3 rounded-2xl hover:bg-zinc-100 transition-all active:scale-[0.98] disabled:opacity-70 disabled:active:scale-100 text-sm"
+          >
+            Skip for now
+          </button>
+        </div>
       </div>
     </div>
   );

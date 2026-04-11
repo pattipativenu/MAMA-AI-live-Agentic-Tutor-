@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
@@ -13,8 +13,25 @@ const firebaseConfig = {
     measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app); // default database
-export const storage = getStorage(app);
+/** Safe init: Vite HMR re-executes this module; a second initializeApp() throws and blanks the app. */
+function getOrInitApp(): FirebaseApp | null {
+  if (!firebaseConfig.apiKey) return null;
+  try {
+    return getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  } catch (e) {
+    console.error('Firebase initialization failed:', e);
+    return null;
+  }
+}
+
+const app = getOrInitApp();
+
+if (!app) {
+  console.error("FIREBASE CONFIGURATION MISSING: VITE_FIREBASE_API_KEY is not defined.");
+  console.error("Please create a .env.local file using .env.example as a template.");
+}
+
+export const auth = app ? getAuth(app) : null as any;
+export const db = app ? getFirestore(app, 'mama') : null as any;
+export const storage = app ? getStorage(app) : null as any;
+

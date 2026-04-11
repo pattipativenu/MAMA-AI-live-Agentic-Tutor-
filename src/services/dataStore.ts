@@ -46,6 +46,11 @@ export function subscribeToSessions(
   uid: string,
   callback: (sessions: SavedSession[]) => void
 ): () => void {
+  if (!db) {
+    console.warn('[DataStore] Firestore not initialized; skipping session subscription.');
+    callback([]);
+    return () => {};
+  }
   const ref = collection(db, 'users', uid, 'sessions');
   const q = query(ref, orderBy('date', 'desc'));
 

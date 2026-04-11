@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../../firebase';
 import { Mail, Lock, AlertCircle, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
@@ -23,6 +23,21 @@ export default function Signup() {
       navigate('/onboarding');
     } catch (err: any) {
       setError(err.message || 'Failed to create account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const demoEmail = import.meta.env.VITE_DEMO_EMAIL || 'demo@mama.ai';
+      const demoPassword = import.meta.env.VITE_DEMO_PASSWORD || 'password123';
+      await signInWithEmailAndPassword(auth, demoEmail, demoPassword);
+      navigate('/');
+    } catch (err: any) {
+      setError(err.message || 'Demo account not configured. Please login manually.');
     } finally {
       setLoading(false);
     }
@@ -111,6 +126,17 @@ export default function Signup() {
             Log in
           </Link>
         </p>
+
+        <div className="pt-4 border-t border-zinc-200">
+          <button
+            type="button"
+            onClick={handleSkip}
+            disabled={loading}
+            className="w-full text-zinc-500 font-bold py-3 rounded-2xl hover:bg-zinc-100 transition-all active:scale-[0.98] disabled:opacity-70 disabled:active:scale-100 text-sm"
+          >
+            Skip for now
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { Component, ReactNode } from 'react';
+import React, { ReactNode } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -17,7 +17,7 @@ interface State {
  * Error Boundary component to catch React errors and prevent full app crashes
  * Wraps Gemini Live sessions to gracefully handle WebSocket/function call errors
  */
-export class ErrorBoundary extends Component<Props, State> {
+export class AppErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
     this.state = { hasError: false, error: null, errorInfo: null };
@@ -99,4 +99,4 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 }
 
-export default ErrorBoundary;
+export default AppErrorBoundary;
