@@ -1,0 +1,29 @@
+# Node dependencies (reinstalled during build)
+node_modules/
+
+# Build output (rebuilt during Docker build)
+dist/
+build/
+
+# Local env files (secrets are injected via Cloud Run env vars)
+.env*
+
+# Google Cloud SDK — extracted locally, not needed in container
+google-cloud-sdk/
+google-cloud-cli-*.tar.gz
+
+# Firebase local cache
+.firebase/
+
+# Editor / OS artifacts
+.DS_Store
+*.log
+.claude/
+.antigravity/
+
+# Agent skills and docs
+.agents/
+docs/superpowers/
+
+# Coverage reports
+coverage/
